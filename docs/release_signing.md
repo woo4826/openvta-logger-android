@@ -20,7 +20,7 @@ The `Release APK` workflow expects these secrets in the `release` environment or
 - `ANDROID_KEY_ALIAS`: key alias.
 - `ANDROID_KEY_PASSWORD`: key password.
 
-The current private repository has these values stored as `release` environment secrets. The secret values are not committed to git.
+Maintainer-controlled repositories should store these values as protected `release` environment secrets. The secret values must not be committed to git.
 
 Create or rotate the base64 value locally:
 

@@ -2,7 +2,9 @@
 
 Kotlin/Jetpack Compose rewrite of the VTA Logger Android app. The app records GPS and phone sensor data, writes VTA-compatible session files, can compress sessions to ZIP, visualizes live and saved sessions, and optionally uploads ZIP files to a user-configured FTP server.
 
-This repository is intended to become an open source Android project. It does not include signing keys, original APK reverse-engineering artifacts, generated release APKs, or user credentials.
+Current app version: `0.0.2`.
+
+This repository is prepared for public collaboration. It does not intentionally track signing keys, original APK reverse-engineering artifacts, generated release APKs, local FTP uploads, or user credentials.
 
 ## Screenshots
 
@@ -25,6 +27,16 @@ This repository is intended to become an open source Android project. It does no
 - Session management with ZIP creation, Android sharesheet export, and optional FTP upload.
 - FTP settings stored through encrypted Android storage. Credentials are user-supplied and are not hardcoded.
 - GitHub Actions CI for build, unit tests, lint, and emulator-based instrumentation checks.
+
+## VTA Data Format
+
+The app keeps raw and derived data separate because exported data is the important compatibility surface:
+
+- `$` records are raw Android GPS fixes only.
+- `@` records are derived/enhanced GPS-like estimates. They include source, confidence, selected IMU preset, and the raw GPS interval they were derived from.
+- `#` records are sensor samples with accelerometer, orientation, gyroscope, rotation-vector, timestamp, and accuracy fields.
+
+Legacy consumers can continue reading `$` and `#` records. New tools should treat `@` records as estimates, not as hardware GPS measurements.
 
 ## Android Support
 
@@ -66,11 +78,30 @@ The locally produced delivery artifacts are kept under `output/apk/` and are ign
 - `VTA_Logger_User_Guide.pdf`
 - `Logger_jinwoo_v0.0.2.zip`
 
+For GitHub Actions releases, configure the protected `release` environment with the secrets documented in `docs/release_signing.md`. Normal pull request and push CI builds debug artifacts only and does not need release secrets.
+
 ## Privacy And Security Notes
 
 VTA sessions can contain precise location, speed, heading, altitude, device sensor values, timestamps, and driver/session identifiers. Treat exported `.Vta` and `.Zip` files as sensitive.
 
 FTP is supported for compatibility, but plain FTP does not encrypt traffic. Prefer local export or a trusted private network unless a secure transport replacement such as FTPS/SFTP is added.
+
+## Public Repository Readiness
+
+Public conversion status from the latest local audit:
+
+- Tracked source does not include the local release keystore, `release-signing/`, generated APK/AAB files, original APK analysis files, decoded APK output, or user logs.
+- Git history is short and does not show tracked keystore/APK/reverse-engineering artifacts.
+- Release signing is isolated to GitHub Actions secrets and local ignored files.
+- CI on `main` currently covers script validation, debug build, unit tests, lint, connected emulator tests, and signed release APK verification.
+
+Before switching GitHub visibility to public:
+
+- Choose and add a `LICENSE`. Without a license, the source is visible but not clearly open source for external reuse.
+- Enable GitHub secret scanning/push protection and keep branch protection on `main`.
+- Keep `release` environment secrets restricted to maintainers; do not expose them to pull requests.
+- Keep original APKs, reverse-engineering outputs, local FTP test roots, and generated release artifacts out of git.
+- Review screenshots and docs for personal data before publishing future updates.
 
 ## Project Layout
 
@@ -92,4 +123,4 @@ FTP is supported for compatibility, but plain FTP does not encrypt traffic. Pref
 
 ## License
 
-License is not selected yet. This repository is currently private and prepared for a future open source release.
+License is not selected yet. Add a license before presenting the repository as open source.
