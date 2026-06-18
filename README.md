@@ -4,7 +4,7 @@ Kotlin/Jetpack Compose rewrite of the VTA Logger Android app. The app records GP
 
 Current app version: `0.0.2`.
 
-This repository is prepared for public collaboration. It does not intentionally track signing keys, original APK reverse-engineering artifacts, generated release APKs, local FTP uploads, or user credentials.
+This repository is prepared for public collaboration under the Apache License 2.0. It does not intentionally track signing keys, original APK reverse-engineering artifacts, generated release APKs, local FTP uploads, or user credentials.
 
 ## Screenshots
 
@@ -19,14 +19,15 @@ This repository is prepared for public collaboration. It does not intentionally 
 ## Features
 
 - Foreground GPS/sensor recording for Android 10+.
+- Global recording control through the dashboard buttons, bottom navigation, foreground-service notification actions, and app-wide floating action button.
 - VTA-style `.Vta` session files with legacy GPS/sensor record prefixes and extended metadata fields.
 - IMU/GPS enhancement presets: Raw GPS, Linear 5Hz, Hermite 10Hz, IMU heading 10Hz, and bounded IMU dead reckoning 10Hz.
 - Export separation: `$` rows are raw GPS, `@` rows are enhanced GPS-like estimates, and `#` rows are sensor samples.
-- Live map with current position, path trace, speed, altitude, accuracy, provider, and recent fixes.
-- Saved session visualization from existing `.Vta` data.
+- MapLibre + OpenStreetMap live map with current position, route path, and separate raw/enhanced point markers.
+- Live and saved-session charts/details for speed, altitude, accuracy, provider, satellites, elapsed realtime, source, and confidence.
 - Session management with ZIP creation, Android sharesheet export, and optional FTP upload.
 - FTP settings stored through encrypted Android storage. Credentials are user-supplied and are not hardcoded.
-- GitHub Actions CI for build, unit tests, lint, and emulator-based instrumentation checks.
+- GitHub Actions CI for script validation, debug build, unit tests, lint, connected emulator checks, and signed release APK artifact generation.
 
 ## VTA Data Format
 
@@ -35,6 +36,7 @@ The app keeps raw and derived data separate because exported data is the importa
 - `$` records are raw Android GPS fixes only.
 - `@` records are derived/enhanced GPS-like estimates. They include source, confidence, selected IMU preset, and the raw GPS interval they were derived from.
 - `#` records are sensor samples with accelerometer, orientation, gyroscope, rotation-vector, timestamp, and accuracy fields.
+- `%% ImuPresetId` records the selected preset for that session.
 
 Legacy consumers can continue reading `$` and `#` records. New tools should treat `@` records as estimates, not as hardware GPS measurements.
 
@@ -68,6 +70,14 @@ Local FTP smoke test helper:
 
 The FTP helper is for local verification only. Do not point tests at production servers.
 
+Signed release builds:
+
+```bash
+./gradlew assembleRelease
+```
+
+Release signing requires ignored local files under `release-signing/` or the GitHub Actions `release` environment secrets documented in `docs/release_signing.md`.
+
 ## Release APK
 
 Release signing material is intentionally excluded from this repository. Build release artifacts only with a private keystore stored outside git.
@@ -86,19 +96,18 @@ VTA sessions can contain precise location, speed, heading, altitude, device sens
 
 FTP is supported for compatibility, but plain FTP does not encrypt traffic. Prefer local export or a trusted private network unless a secure transport replacement such as FTPS/SFTP is added.
 
-## Public Repository Readiness
+## Public Repository Policy
 
-Public conversion status from the latest local audit:
+Current public-readiness status from the latest local audit:
 
 - Tracked source does not include the local release keystore, `release-signing/`, generated APK/AAB files, original APK analysis files, decoded APK output, or user logs.
 - Git history is short and does not show tracked keystore/APK/reverse-engineering artifacts.
 - Release signing is isolated to GitHub Actions secrets and local ignored files.
 - CI on `main` currently covers script validation, debug build, unit tests, lint, connected emulator tests, and signed release APK verification.
+- Branch protection and secret scanning/push protection should remain enabled on GitHub.
 
-Before switching GitHub visibility to public:
+Rules for future changes:
 
-- Choose and add a `LICENSE`. Without a license, the source is visible but not clearly open source for external reuse.
-- Enable GitHub secret scanning/push protection and keep branch protection on `main`.
 - Keep `release` environment secrets restricted to maintainers; do not expose them to pull requests.
 - Keep original APKs, reverse-engineering outputs, local FTP test roots, and generated release artifacts out of git.
 - Review screenshots and docs for personal data before publishing future updates.
@@ -123,4 +132,4 @@ Before switching GitHub visibility to public:
 
 ## License
 
-License is not selected yet. Add a license before presenting the repository as open source.
+This project is licensed under the Apache License 2.0. See `LICENSE`.
