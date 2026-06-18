@@ -8,8 +8,8 @@ For open source collaboration, use this split:
 
 - Pull requests: build debug APK, unit tests, lint, and emulator tests. No release secret access.
 - Maintainer release: protected GitHub Actions environment named `release`, manual approval, and release signing secrets.
-- Play Store distribution: use Google Play App Signing and store only the upload key in CI.
-- Direct APK distribution: protect the release keystore more strictly because that key is the app update identity for users.
+- Direct APK distribution: protect the release keystore strictly because that key is the app update identity for users. This is the current project default.
+- Future Play Store distribution: use Google Play App Signing and store only the upload key in CI.
 
 ## GitHub Secrets
 
@@ -20,7 +20,9 @@ The `Release APK` workflow expects these secrets in the `release` environment or
 - `ANDROID_KEY_ALIAS`: key alias.
 - `ANDROID_KEY_PASSWORD`: key password.
 
-Create the base64 value locally:
+The current private repository has these values stored as `release` environment secrets. The secret values are not committed to git.
+
+Create or rotate the base64 value locally:
 
 ```bash
 base64 -i release-signing/vta-logger-release.jks | pbcopy
@@ -44,6 +46,7 @@ Safe defaults:
 - Do not use `pull_request_target` to build untrusted contributor code with secrets.
 - Prefer `workflow_dispatch` or protected `v*` tags for signed artifacts.
 - Add required reviewers to the `release` environment before inviting external collaborators.
+- If the current GitHub plan does not support environment protection rules for private repositories, restrict write/admin access and treat release workflow dispatch/tag creation as maintainer-only.
 - Rotate the upload key if it is ever exposed.
 
 ## Play Store Versus Direct APK
