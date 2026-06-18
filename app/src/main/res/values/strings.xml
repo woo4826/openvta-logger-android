@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VTA Logger</string>
+    <string name="recording_channel_name">VTA recording</string>
+    <string name="upload_channel_name">VTA uploads</string>
+</resources>
