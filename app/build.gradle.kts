@@ -1,4 +1,27 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+val releaseSigningPropertiesFile = rootProject.file("release-signing/keystore.properties")
+val releaseSigningProperties = Properties().apply {
+    if (releaseSigningPropertiesFile.exists()) {
+        releaseSigningPropertiesFile.inputStream().use(::load)
+    }
+}
+val hasReleaseSigningProperties = listOf(
+    "storeFile",
+    "storePassword",
+    "keyAlias",
+    "keyPassword",
+).all { key -> !releaseSigningProperties.getProperty(key).isNullOrBlank() }
+val releaseStoreFile = releaseSigningProperties.getProperty("storeFile")?.let { path ->
+    val configuredFile = file(path)
+    when {
+        configuredFile.isAbsolute -> configuredFile
+        releaseSigningPropertiesFile.parentFile.resolve(path).exists() ->
+            releaseSigningPropertiesFile.parentFile.resolve(path)
+        else -> rootProject.file(path)
+    }
+}
 
 plugins {
     id("com.android.application")
@@ -20,9 +43,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigningProperties && releaseStoreFile != null) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseSigningProperties.getProperty("storePassword")
+                keyAlias = releaseSigningProperties.getProperty("keyAlias")
+                keyPassword = releaseSigningProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigningProperties) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

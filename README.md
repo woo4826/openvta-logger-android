@@ -79,6 +79,7 @@ FTP is supported for compatibility, but plain FTP does not encrypt traffic. Pref
 - `app/src/main/java/com/temporal/vtalogger/ui/`: Compose UI and visualization views.
 - `.github/workflows/android-ci.yml`: CI build/test/lint and emulator verification.
 - `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation and IMU interpolation/fusion roadmap.
+- `docs/release_signing.md`: release keystore and GitHub Actions secret strategy.
 
 ## Roadmap
 
