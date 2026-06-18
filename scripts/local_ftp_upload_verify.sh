@@ -91,7 +91,7 @@ fi
 
 UPLOADED_ZIP="${uploaded_files[0]}"
 APP_ZIP="$FTP_ROOT/app-side-$(basename "$UPLOADED_ZIP")"
-"$ADB" exec-out run-as com.temporal.vtalogger sh -c 'cat "$(ls -t files/vta/sessions/*.Zip | head -n 1)"' > "$APP_ZIP"
+"$ADB" exec-out run-as dev.openvta.logger sh -c 'cat "$(ls -t files/vta/sessions/*.Zip | head -n 1)"' > "$APP_ZIP"
 
 if ! cmp -s "$APP_ZIP" "$UPLOADED_ZIP"; then
   echo "Uploaded ZIP differs from app-side ZIP." >&2

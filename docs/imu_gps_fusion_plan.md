@@ -29,7 +29,7 @@ The app already stores the two key timing primitives needed for this work:
 
 ## Phase 1: Timestamp-Aligned Visualization Interpolation
 
-This is the lowest-risk improvement and is implemented in v0.0.2 as a bounded estimator rather than a raw GPS replacement.
+This is the lowest-risk improvement and was introduced in v0.0.2 as a bounded estimator rather than a raw GPS replacement.
 
 Goals:
 

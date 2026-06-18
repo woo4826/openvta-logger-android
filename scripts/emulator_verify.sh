@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE="com.temporal.vtalogger"
-ACTIVITY="com.temporal.vtalogger/.MainActivity"
+PACKAGE="dev.openvta.logger"
+ACTIVITY="dev.openvta.logger/.MainActivity"
 APK="app/build/outputs/apk/debug/app-debug.apk"
 ANDROID_SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
 ADB="${ADB:-$ANDROID_SDK/platform-tools/adb}"

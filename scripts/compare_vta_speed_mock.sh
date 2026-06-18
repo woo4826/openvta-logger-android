@@ -6,7 +6,7 @@ ADB="${ADB:-$ANDROID_SDK/platform-tools/adb}"
 ORIGINAL_APK="${ORIGINAL_APK:-VTALogger_V230.apk}"
 NEW_APK="${NEW_APK:-app/build/outputs/apk/debug/app-debug.apk}"
 ORIGINAL_PACKAGE="VTA.Logger"
-NEW_PACKAGE="com.temporal.vtalogger"
+NEW_PACKAGE="dev.openvta.logger"
 MOCK_SPEED_KNOTS="${MOCK_SPEED_KNOTS:-13.89}"
 OUT_DIR="${OUT_DIR:-/tmp/vta-speed-compare}"
 
@@ -142,5 +142,5 @@ sleep 2
 copy_new_vta
 
 assert_nonzero_speed "Original VTALogger_V230" "$OUT_DIR/original.Vta"
-assert_nonzero_speed "Kotlin VTA Logger" "$OUT_DIR/kotlin.Vta"
+assert_nonzero_speed "Kotlin OpenVTA Logger" "$OUT_DIR/kotlin.Vta"
 printf "Speed comparison artifacts: %s/original.Vta and %s/kotlin.Vta\n" "$OUT_DIR" "$OUT_DIR"

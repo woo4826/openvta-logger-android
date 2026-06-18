@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VtaLoggerKotlin"
+rootProject.name = "OpenVtaLoggerAndroid"
 include(":app")

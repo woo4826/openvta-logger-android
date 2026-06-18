@@ -25,13 +25,13 @@ Maintainer-controlled repositories should store these values as protected `relea
 Create or rotate the base64 value locally:
 
 ```bash
-base64 -i release-signing/vta-logger-release.jks | pbcopy
+base64 -i release-signing/openvta-logger-release.jks | pbcopy
 ```
 
 On Linux:
 
 ```bash
-base64 -w 0 release-signing/vta-logger-release.jks
+base64 -w 0 release-signing/openvta-logger-release.jks
 ```
 
 GitHub officially documents base64-encoding small binary blobs for Actions secrets. Environment secrets can also be protected with required reviewers, so the release job cannot access them until approval is granted.
@@ -60,7 +60,7 @@ For direct APK sharing outside Play Store, users can only update to future APKs 
 Local signing still uses ignored files under `release-signing/`:
 
 ```properties
-storeFile=vta-logger-release.jks
+storeFile=openvta-logger-release.jks
 storePassword=...
 keyAlias=...
 keyPassword=...

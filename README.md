@@ -1,8 +1,8 @@
-# VTA Logger Android
+# OpenVTA Logger Android
 
-Kotlin/Jetpack Compose rewrite of the VTA Logger Android app. The app records GPS and phone sensor data, writes VTA-compatible session files, can compress sessions to ZIP, visualizes live and saved sessions, and optionally uploads ZIP files to a user-configured FTP server.
+Open-source Kotlin/Jetpack Compose Android logger for GPS and phone sensor data. The app writes VTA-compatible session files, can compress sessions to ZIP, visualizes live and saved sessions, and optionally uploads ZIP files to a user-configured FTP server.
 
-Current app version: `0.0.2`.
+Current app version: `0.0.3`.
 
 This repository is prepared for public collaboration under the Apache License 2.0. It does not intentionally track signing keys, original APK reverse-engineering artifacts, generated release APKs, local FTP uploads, or user credentials.
 
@@ -42,12 +42,20 @@ Legacy consumers can continue reading `$` and `#` records. New tools should trea
 
 ## Android Support
 
-- `applicationId`: `com.temporal.vtalogger`
+- `applicationId`: `dev.openvta.logger`
 - `minSdk`: 29, Android 10
 - `targetSdk`: 35
 - Primary permissions: location, foreground service location, notifications on Android 13+, internet, network state, and wake lock.
 - WorkManager/AndroidX may merge boot/network receiver permissions for upload retry scheduling. The app does not include a custom boot flow that starts recording automatically.
 - Background location is not requested in v1. Recording is started by the user and runs through a foreground service notification.
+
+## Install Notes
+
+Version `0.0.3` changed the package from the earlier Kotlin test package `com.temporal.vtalogger` to `dev.openvta.logger`.
+
+- Android treats `dev.openvta.logger` as a separate app, so `0.0.3` can coexist with earlier `com.temporal.vtalogger` test builds.
+- Users who installed `0.0.2` should uninstall the older test app after exporting any needed sessions, then use `0.0.3` as the new OpenVTA Logger line.
+- Future `dev.openvta.logger` releases must use the same release signing key to support normal APK updates.
 
 ## Build And Test
 
@@ -84,9 +92,9 @@ Release signing material is intentionally excluded from this repository. Build r
 
 The locally produced delivery artifacts are kept under `output/apk/` and are ignored by git:
 
-- `VTA-Logger-0.0.2-release.apk`
-- `VTA_Logger_User_Guide.pdf`
-- `Logger_jinwoo_v0.0.2.zip`
+- `OpenVTA-Logger-0.0.3-release.apk`
+- `OpenVTA_Logger_User_Guide.pdf`
+- `OpenVTA_Logger_v0.0.3.zip`
 
 For GitHub Actions releases, configure the protected `release` environment with the secrets documented in `docs/release_signing.md`. Normal pull request and push CI builds debug artifacts only and does not need release secrets.
 
@@ -114,13 +122,13 @@ Rules for future changes:
 
 ## Project Layout
 
-- `app/src/main/java/com/temporal/vtalogger/recording/`: foreground recording service.
-- `app/src/main/java/com/temporal/vtalogger/data/`: repositories and encrypted settings.
-- `app/src/main/java/com/temporal/vtalogger/domain/`: VTA formatting, parsing, distance, filenames, ZIP helpers.
-- `app/src/main/java/com/temporal/vtalogger/upload/`: FTP upload worker/client.
-- `app/src/main/java/com/temporal/vtalogger/ui/`: Compose UI and visualization views.
+- `app/src/main/java/dev/openvta/logger/recording/`: foreground recording service.
+- `app/src/main/java/dev/openvta/logger/data/`: repositories and encrypted settings.
+- `app/src/main/java/dev/openvta/logger/domain/`: VTA formatting, parsing, distance, filenames, ZIP helpers.
+- `app/src/main/java/dev/openvta/logger/upload/`: FTP upload worker/client.
+- `app/src/main/java/dev/openvta/logger/ui/`: Compose UI and visualization views.
 - `.github/workflows/android-ci.yml`: CI build/test/lint and emulator verification.
-- `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation, implemented v0.0.2 enhancement presets, and IMU fusion roadmap.
+- `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation, v0.0.2+ enhancement presets, and IMU fusion roadmap.
 - `docs/release_signing.md`: release keystore and GitHub Actions secret strategy.
 
 ## Roadmap
