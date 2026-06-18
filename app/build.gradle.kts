@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.File
 import java.util.Properties
 
 val releaseSigningPropertiesFile = rootProject.file("release-signing/keystore.properties")
@@ -14,7 +15,7 @@ val hasReleaseSigningProperties = listOf(
     "keyPassword",
 ).all { key -> !releaseSigningProperties.getProperty(key).isNullOrBlank() }
 val releaseStoreFile = releaseSigningProperties.getProperty("storeFile")?.let { path ->
-    val configuredFile = file(path)
+    val configuredFile = File(path)
     when {
         configuredFile.isAbsolute -> configuredFile
         releaseSigningPropertiesFile.parentFile.resolve(path).exists() ->
