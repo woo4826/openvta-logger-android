@@ -11,6 +11,7 @@ data class AppSettings(
     val passiveMode: Boolean = true,
     val keepLocalFiles: Boolean = true,
     val darkMode: Boolean = false,
+    val imuPresetId: String = ImuEnhancementPresets.DEFAULT_ID,
 )
 
 enum class UploadState {
@@ -30,6 +31,7 @@ data class RecordingSession(
     val endedAtMillis: Long? = null,
     val uploadState: UploadState = UploadState.NotQueued,
     val lastError: String? = null,
+    val imuPresetId: String = ImuEnhancementPresets.DEFAULT_ID,
 )
 
 data class GpsSample(
@@ -48,6 +50,8 @@ data class GpsSample(
 data class SensorSnapshot(
     val orientation: FloatArray = floatArrayOf(0f, 0f, 0f),
     val magnetic: FloatArray = floatArrayOf(0f, 0f, 0f),
+    val gyro: FloatArray = floatArrayOf(0f, 0f, 0f),
+    val rotation: FloatArray = floatArrayOf(0f, 0f, 0f),
 ) {
     fun orientationX() = orientation.getOrElse(0) { 0f }
     fun orientationY() = orientation.getOrElse(1) { 0f }
@@ -55,6 +59,12 @@ data class SensorSnapshot(
     fun magneticX() = magnetic.getOrElse(0) { 0f }
     fun magneticY() = magnetic.getOrElse(1) { 0f }
     fun magneticZ() = magnetic.getOrElse(2) { 0f }
+    fun gyroX() = gyro.getOrElse(0) { 0f }
+    fun gyroY() = gyro.getOrElse(1) { 0f }
+    fun gyroZ() = gyro.getOrElse(2) { 0f }
+    fun rotationAzimuth() = rotation.getOrElse(0) { 0f }
+    fun rotationPitch() = rotation.getOrElse(1) { 0f }
+    fun rotationRoll() = rotation.getOrElse(2) { 0f }
 }
 
 data class SensorSample(

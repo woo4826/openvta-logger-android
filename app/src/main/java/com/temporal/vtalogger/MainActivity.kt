@@ -77,10 +77,13 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.temporal.vtalogger.domain.AppSettings
 import com.temporal.vtalogger.domain.GpsSample
+import com.temporal.vtalogger.domain.ImuEnhancementPreset
+import com.temporal.vtalogger.domain.ImuEnhancementPresets
 import com.temporal.vtalogger.domain.RecordingSession
 import com.temporal.vtalogger.domain.SessionVisualization
 import com.temporal.vtalogger.domain.UploadState
 import com.temporal.vtalogger.domain.VtaLogParser
+import com.temporal.vtalogger.domain.VtaTraceEnhancer
 import com.temporal.vtalogger.recording.RecordingForegroundService
 import com.temporal.vtalogger.ui.VisualizationCard
 import com.temporal.vtalogger.upload.UploadWorker
@@ -163,6 +166,9 @@ class MainActivity : ComponentActivity() {
             } else {
                 current.darkMode
             },
+            imuPresetId = intent.getStringExtra(EXTRA_AUTOMATION_IMU_PRESET_ID)?.let {
+                ImuEnhancementPresets.find(it).id
+            } ?: current.imuPresetId,
         )
         repository.save(updated)
         (application as VtaLoggerApp).container.updateStatus {
@@ -182,6 +188,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AUTOMATION_PASSIVE_MODE = "debugPassiveMode"
         const val EXTRA_AUTOMATION_KEEP_LOCAL_FILES = "debugKeepLocalFiles"
         const val EXTRA_AUTOMATION_DARK_MODE = "debugDarkMode"
+        const val EXTRA_AUTOMATION_IMU_PRESET_ID = "debugImuPresetId"
     }
 }
 
@@ -234,6 +241,7 @@ private fun VtaLoggerAppScreen(
     }
 
     val startRecording = {
+        app.container.settingsRepository.save(settings)
         val permissions = requiredPermissions()
         val missing = permissions.filter {
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
@@ -275,6 +283,7 @@ private fun VtaLoggerAppScreen(
             AppTab.Dashboard -> DashboardScreen(
                 modifier = contentModifier,
                 isRecording = status.isRecording,
+                imuPreset = ImuEnhancementPresets.find(settings.imuPresetId),
                 gpsFixes = status.gpsFixCount,
                 sensorSamples = status.sensorSampleCount,
                 speedKmh = status.speedKmh,
@@ -288,7 +297,7 @@ private fun VtaLoggerAppScreen(
             AppTab.Live -> LiveScreen(
                 modifier = contentModifier,
                 title = if (status.isRecording) "Live visualization" else "Live visualization idle",
-                trace = status.liveTrace,
+                trace = status.liveTrace.copy(enhancementPresetId = status.currentSession?.imuPresetId ?: settings.imuPresetId),
                 followLatest = status.isRecording,
             )
             AppTab.Sessions -> SessionsScreen(
@@ -302,7 +311,12 @@ private fun VtaLoggerAppScreen(
                         busySessionId = session.id
                         try {
                             val trace = withContext(Dispatchers.IO) {
-                                VtaLogParser.parse(session.vtaFile)
+                                val parsed = VtaLogParser.parse(session.vtaFile)
+                                if (parsed.enhancedGpsPoints.isEmpty()) {
+                                    VtaTraceEnhancer.enhance(parsed, session.imuPresetId)
+                                } else {
+                                    parsed.copy(enhancementPresetId = session.imuPresetId)
+                                }
                             }
                             selectedVisualization = SessionVisualization(session = session, trace = trace)
                             app.container.updateStatus { status -> status.copy(lastMessage = "Loaded session: ${session.id}") }
@@ -430,6 +444,7 @@ private fun AppNavigationBar(
 private fun DashboardScreen(
     modifier: Modifier,
     isRecording: Boolean,
+    imuPreset: ImuEnhancementPreset,
     gpsFixes: Long,
     sensorSamples: Long,
     speedKmh: Double,
@@ -447,6 +462,7 @@ private fun DashboardScreen(
         item {
             DashboardCard(
                 isRecording = isRecording,
+                imuPreset = imuPreset,
                 gpsFixes = gpsFixes,
                 sensorSamples = sensorSamples,
                 speedKmh = speedKmh,
@@ -561,6 +577,7 @@ private fun SettingsScreen(
 @Composable
 private fun DashboardCard(
     isRecording: Boolean,
+    imuPreset: ImuEnhancementPreset,
     gpsFixes: Long,
     sensorSamples: Long,
     speedKmh: Double,
@@ -575,6 +592,11 @@ private fun DashboardCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (isRecording) "Recording" else "Ready", style = MaterialTheme.typography.headlineSmall)
             Text(message)
+            Text(
+                "IMU preset: ${imuPreset.displayName} (${imuPreset.outputHz}Hz display)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             HorizontalDivider()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("GPS fixes: $gpsFixes")
@@ -668,6 +690,12 @@ private fun SettingsCard(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
+            ImuPresetSelector(
+                selectedPreset = ImuEnhancementPresets.find(settings.imuPresetId),
+                onPresetSelected = { preset ->
+                    onSettingsChange(settings.copy(imuPresetId = preset.id))
+                },
+            )
             OutlinedTextField(
                 value = settings.ftpHost,
                 onValueChange = { onSettingsChange(settings.copy(ftpHost = it)) },
@@ -717,6 +745,43 @@ private fun SettingsCard(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+    }
+}
+
+@Composable
+private fun ImuPresetSelector(
+    selectedPreset: ImuEnhancementPreset,
+    onPresetSelected: (ImuEnhancementPreset) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("IMU/GPS enhancement preset", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "${selectedPreset.outputHz}Hz display path - ${selectedPreset.description}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ImuEnhancementPresets.all.forEach { preset ->
+            if (preset.id == selectedPreset.id) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onPresetSelected(preset) },
+                ) {
+                    Text(preset.displayName)
+                }
+            } else {
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onPresetSelected(preset) },
+                ) {
+                    Text("${preset.displayName}: ${preset.description}")
+                }
+            }
+        }
+        Text(
+            "Raw GPS rows stay unchanged as \$ records. Enhanced export rows are saved as @ records with source and confidence.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

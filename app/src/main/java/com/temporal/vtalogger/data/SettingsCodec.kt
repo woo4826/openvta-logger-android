@@ -1,6 +1,7 @@
 package com.temporal.vtalogger.data
 
 import com.temporal.vtalogger.domain.AppSettings
+import com.temporal.vtalogger.domain.ImuEnhancementPresets
 import java.io.StringReader
 import java.io.StringWriter
 import java.util.Properties
@@ -16,6 +17,7 @@ object SettingsCodec {
         properties.setProperty("passiveMode", settings.passiveMode.toString())
         properties.setProperty("keepLocalFiles", settings.keepLocalFiles.toString())
         properties.setProperty("darkMode", settings.darkMode.toString())
+        properties.setProperty("imuPresetId", ImuEnhancementPresets.find(settings.imuPresetId).id)
         return StringWriter().use { writer ->
             properties.store(writer, "VTA Logger encrypted settings")
             writer.toString()
@@ -34,6 +36,7 @@ object SettingsCodec {
             passiveMode = properties.getProperty("passiveMode", "true").toBooleanStrictOrNull() ?: true,
             keepLocalFiles = properties.getProperty("keepLocalFiles", "true").toBooleanStrictOrNull() ?: true,
             darkMode = properties.getProperty("darkMode", "false").toBooleanStrictOrNull() ?: false,
+            imuPresetId = ImuEnhancementPresets.find(properties.getProperty("imuPresetId")).id,
         )
     }
 }

@@ -18,6 +18,8 @@ This repository is intended to become an open source Android project. It does no
 
 - Foreground GPS/sensor recording for Android 10+.
 - VTA-style `.Vta` session files with legacy GPS/sensor record prefixes and extended metadata fields.
+- IMU/GPS enhancement presets: Raw GPS, Linear 5Hz, Hermite 10Hz, IMU heading 10Hz, and bounded IMU dead reckoning 10Hz.
+- Export separation: `$` rows are raw GPS, `@` rows are enhanced GPS-like estimates, and `#` rows are sensor samples.
 - Live map with current position, path trace, speed, altitude, accuracy, provider, and recent fixes.
 - Saved session visualization from existing `.Vta` data.
 - Session management with ZIP creation, Android sharesheet export, and optional FTP upload.
@@ -60,9 +62,9 @@ Release signing material is intentionally excluded from this repository. Build r
 
 The locally produced delivery artifacts are kept under `output/apk/` and are ignored by git:
 
-- `VTA-Logger-1.0.0-release.apk`
+- `VTA-Logger-0.0.2-release.apk`
 - `VTA_Logger_User_Guide.pdf`
-- `Logger_jinwoo_v0.0.1.zip`
+- `Logger_jinwoo_v0.0.2.zip`
 
 ## Privacy And Security Notes
 
@@ -78,12 +80,11 @@ FTP is supported for compatibility, but plain FTP does not encrypt traffic. Pref
 - `app/src/main/java/com/temporal/vtalogger/upload/`: FTP upload worker/client.
 - `app/src/main/java/com/temporal/vtalogger/ui/`: Compose UI and visualization views.
 - `.github/workflows/android-ci.yml`: CI build/test/lint and emulator verification.
-- `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation and IMU interpolation/fusion roadmap.
+- `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation, implemented v0.0.2 enhancement presets, and IMU fusion roadmap.
 - `docs/release_signing.md`: release keystore and GitHub Actions secret strategy.
 
 ## Roadmap
 
-- IMU-assisted interpolation for smoother live visualization between 1 Hz GPS fixes.
 - Real-time ESKF/EKF fusion for short GPS gaps and low-latency path estimation.
 - Offline smoothing for saved sessions.
 - Optional map matching for road-only workflows.

@@ -4,6 +4,8 @@ import android.content.Context
 import com.temporal.vtalogger.BuildConfig
 import com.temporal.vtalogger.domain.FileNames
 import com.temporal.vtalogger.domain.GpsSample
+import com.temporal.vtalogger.domain.GpsTracePoint
+import com.temporal.vtalogger.domain.ImuEnhancementPresets
 import com.temporal.vtalogger.domain.RecordingSession
 import com.temporal.vtalogger.domain.SensorSample
 import com.temporal.vtalogger.domain.UploadState
@@ -22,8 +24,13 @@ class RecordingRepository(context: Context) {
     private var activeWriter: BufferedWriter? = null
     private var bufferedLineCount = 0
 
-    fun createSession(driverId: String, startedAtMillis: Long = System.currentTimeMillis()): RecordingSession {
+    fun createSession(
+        driverId: String,
+        startedAtMillis: Long = System.currentTimeMillis(),
+        imuPresetId: String = ImuEnhancementPresets.DEFAULT_ID,
+    ): RecordingSession {
         val safeDriver = FileNames.sanitizeDriverId(driverId)
+        val safePreset = ImuEnhancementPresets.find(imuPresetId).id
         val baseName = FileNames.sessionBaseName(startedAtMillis, safeDriver)
         val session = RecordingSession(
             id = baseName,
@@ -31,10 +38,11 @@ class RecordingRepository(context: Context) {
             startedAtMillis = startedAtMillis,
             vtaFile = File(sessionsDir, "$baseName.Vta"),
             zipFile = File(sessionsDir, "$baseName.Zip"),
+            imuPresetId = safePreset,
         )
         synchronized(lock) {
             closeActiveWriterLocked()
-            session.vtaFile.writeText(formatter.header())
+            session.vtaFile.writeText(formatter.header() + formatter.imuPresetHeader(safePreset) + "\n")
             openActiveWriterLocked(session)
             writeMeta(session)
         }
@@ -47,6 +55,10 @@ class RecordingRepository(context: Context) {
 
     fun appendSensor(session: RecordingSession, sample: SensorSample) {
         appendLine(session, formatter.formatSensor(sample), flushNow = false)
+    }
+
+    fun appendEnhancedGps(session: RecordingSession, point: GpsTracePoint) {
+        appendLine(session, formatter.formatEnhancedGps(point, session.imuPresetId), flushNow = false)
     }
 
     fun closeSession(session: RecordingSession, endedAtMillis: Long = System.currentTimeMillis()): RecordingSession {
@@ -91,6 +103,9 @@ class RecordingRepository(context: Context) {
             lastError = properties.getProperty("lastError").takeUnless { it.isNullOrBlank() },
             vtaFile = vtaFile,
             zipFile = zipFile,
+            imuPresetId = ImuEnhancementPresets.find(
+                properties.getProperty("imuPresetId"),
+            ).id,
         )
     }
 
@@ -156,6 +171,7 @@ class RecordingRepository(context: Context) {
         properties.setProperty("vtaFile", session.vtaFile.name)
         properties.setProperty("zipFile", session.zipFile.name)
         properties.setProperty("lastError", session.lastError.orEmpty())
+        properties.setProperty("imuPresetId", ImuEnhancementPresets.find(session.imuPresetId).id)
         File(sessionsDir, "${session.id}.meta").outputStream().use {
             properties.store(it, "VTA Logger session metadata")
         }

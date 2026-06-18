@@ -32,9 +32,12 @@ import com.temporal.vtalogger.R
 import com.temporal.vtalogger.VtaLoggerApp
 import com.temporal.vtalogger.domain.DistanceCalculator
 import com.temporal.vtalogger.domain.GpsSample
+import com.temporal.vtalogger.domain.GpsTracePoint
+import com.temporal.vtalogger.domain.ImuEnhancementPresets
 import com.temporal.vtalogger.domain.RecordingSession
 import com.temporal.vtalogger.domain.SensorSample
 import com.temporal.vtalogger.domain.SensorSnapshot
+import com.temporal.vtalogger.domain.VtaTraceEnhancer
 import kotlin.math.roundToInt
 
 class RecordingForegroundService : Service(), SensorEventListener, LocationListener {
@@ -49,12 +52,16 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
     private var startedAtMillis = 0L
     private var sensorIndex = 0L
     private var gpsFixCount = 0L
+    private var recordedGpsPointCount = 0
     private var distanceMeters = 0.0
     private var lastLocation: Location? = null
+    private var lastRecordedGpsPoint: GpsTracePoint? = null
     private var satelliteCount = 0
     private var sensorAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE
     private var latestOrientation = floatArrayOf(0f, 0f, 0f)
     private var latestMagnetic = floatArrayOf(0f, 0f, 0f)
+    private var latestGyro = floatArrayOf(0f, 0f, 0f)
+    private var latestRotation = floatArrayOf(0f, 0f, 0f)
     private var wakeLock: PowerManager.WakeLock? = null
     private var locationThread: HandlerThread? = null
     private var locationHandler: Handler? = null
@@ -106,11 +113,17 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         startedAtMillis = System.currentTimeMillis()
         sensorIndex = 0L
         gpsFixCount = 0L
+        recordedGpsPointCount = 0
         distanceMeters = 0.0
         lastLocation = null
+        lastRecordedGpsPoint = null
         lastSensorStatusUpdateMillis = 0L
         paused = false
-        session = app.container.recordingRepository.createSession(settings.driverId, startedAtMillis)
+        session = app.container.recordingRepository.createSession(
+            driverId = settings.driverId,
+            startedAtMillis = startedAtMillis,
+            imuPresetId = settings.imuPresetId,
+        )
         app.container.liveTraceStore.clear()
 
         acquireWakeLock()
@@ -154,6 +167,9 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
 
     private fun setPaused(value: Boolean) {
         paused = value
+        if (value) {
+            lastRecordedGpsPoint = null
+        }
         app.container.updateStatus { it.copy(isPaused = value, lastMessage = if (value) "Recording paused" else "Recording resumed") }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(if (value) "Paused" else "Recording"))
@@ -183,6 +199,8 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         }
 
         registerSensor(Sensor.TYPE_ACCELEROMETER)
+        registerSensor(Sensor.TYPE_GYROSCOPE)
+        registerSensor(Sensor.TYPE_ROTATION_VECTOR)
         registerSensor(Sensor.TYPE_MAGNETIC_FIELD)
         @Suppress("DEPRECATION")
         registerSensor(Sensor.TYPE_ORIENTATION)
@@ -259,10 +277,33 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
             },
         )
 
-        if (!paused) {
+        val liveTraceWithRaw = app.container.liveTraceStore.appendGps(sample)
+        val currentRawPoint = liveTraceWithRaw.gpsPoints.lastOrNull()
+        var liveTraceForStatus = liveTraceWithRaw
+        if (!paused && currentRawPoint != null) {
+            val previousRawPoint = lastRecordedGpsPoint
+            val previousRawIndex = recordedGpsPointCount - 1
             app.container.recordingRepository.appendGps(activeSession, sample)
+            recordedGpsPointCount += 1
+
+            val preset = ImuEnhancementPresets.find(activeSession.imuPresetId)
+            val enhancedPoints = previousRawPoint?.let { previous ->
+                VtaTraceEnhancer.enhanceInterval(
+                    start = previous,
+                    end = currentRawPoint,
+                    sensors = liveTraceWithRaw.sensorPoints,
+                    preset = preset,
+                    rawStartIndex = previousRawIndex.coerceAtLeast(0),
+                )
+            }.orEmpty()
+            if (enhancedPoints.isNotEmpty()) {
+                enhancedPoints.forEach { point ->
+                    app.container.recordingRepository.appendEnhancedGps(activeSession, point)
+                }
+                liveTraceForStatus = app.container.liveTraceStore.appendEnhancedGps(enhancedPoints)
+            }
+            lastRecordedGpsPoint = currentRawPoint
         }
-        val liveTrace = app.container.liveTraceStore.appendGps(sample)
         app.container.updateStatus {
             it.copy(
                 gpsFixCount = gpsFixCount,
@@ -270,7 +311,7 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
                 distanceMeters = distanceMeters,
                 lastGps = sample,
                 lastMessage = "GPS ${sample.latitude.format(5)}, ${sample.longitude.format(5)}",
-                liveTrace = liveTrace,
+                liveTrace = liveTraceForStatus,
             )
         }
     }
@@ -278,6 +319,8 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_MAGNETIC_FIELD -> latestMagnetic = event.values.copyOf(3)
+            Sensor.TYPE_GYROSCOPE -> latestGyro = event.values.copyOf(3)
+            Sensor.TYPE_ROTATION_VECTOR -> latestRotation = rotationVectorToDegrees(event)
             @Suppress("DEPRECATION")
             Sensor.TYPE_ORIENTATION -> latestOrientation = event.values.copyOf(3)
             Sensor.TYPE_ACCELEROMETER -> recordAccelerometer(event)
@@ -306,6 +349,8 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
             snapshot = SensorSnapshot(
                 orientation = latestOrientation.copyOf(3),
                 magnetic = latestMagnetic.copyOf(3),
+                gyro = latestGyro.copyOf(3),
+                rotation = latestRotation.copyOf(3),
             ),
             accel = event.values.copyOf(3),
             sensorTimestampNanos = event.timestamp,
@@ -369,6 +414,25 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private fun Double.format(decimals: Int): String = "%.${decimals}f".format(this)
+
+    private fun rotationVectorToDegrees(event: SensorEvent): FloatArray {
+        val rotationMatrix = FloatArray(9)
+        val orientationRadians = FloatArray(3)
+        SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+        SensorManager.getOrientation(rotationMatrix, orientationRadians)
+        return floatArrayOf(
+            orientationRadians[0].toDegrees().normalizeDegrees(),
+            orientationRadians[1].toDegrees(),
+            orientationRadians[2].toDegrees(),
+        )
+    }
+
+    private fun Float.toDegrees(): Float = (this * 180f / Math.PI.toFloat())
+
+    private fun Float.normalizeDegrees(): Float {
+        val mod = this % 360f
+        return if (mod < 0f) mod + 360f else mod
+    }
 
     companion object {
         const val ACTION_START = "com.temporal.vtalogger.action.START_RECORDING"

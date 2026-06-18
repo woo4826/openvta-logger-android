@@ -74,33 +74,34 @@ fun VisualizationCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
             SummaryRow(trace)
-            if (trace.gpsPoints.isEmpty()) {
+            val displayPoints = trace.displayGpsPoints
+            if (displayPoints.isEmpty()) {
                 Text("Waiting for GPS route", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text("Route map", style = MaterialTheme.typography.titleSmall)
-            MapLibreRouteMap(points = trace.gpsPoints, followLatest = followLatest)
+            MapLibreRouteMap(trace = trace, followLatest = followLatest)
             Text(
                 "Map data © OpenStreetMap contributors",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LatestGpsDetails(trace.latestGps)
-            RecentGpsFixes(trace.gpsPoints.takeLast(5))
+            RecentGpsFixes(displayPoints.takeLast(5))
             MetricLineChart(
                 title = "Speed km/h",
-                values = trace.gpsPoints.map { it.speedKmh },
+                values = displayPoints.map { it.speedKmh },
                 lineColor = MaterialTheme.colorScheme.primary,
                 emptyText = "No GPS speed data",
             )
             MetricLineChart(
                 title = "Altitude m",
-                values = trace.gpsPoints.map { it.altitudeMeters },
+                values = displayPoints.map { it.altitudeMeters },
                 lineColor = MaterialTheme.colorScheme.tertiary,
                 emptyText = "No altitude data",
             )
             MetricLineChart(
                 title = "Accuracy m",
-                values = trace.gpsPoints.mapNotNull { it.accuracyMeters },
+                values = displayPoints.mapNotNull { it.accuracyMeters },
                 lineColor = MaterialTheme.colorScheme.error,
                 emptyText = "No accuracy data",
             )
@@ -110,11 +111,18 @@ fun VisualizationCard(
 
 @Composable
 private fun SummaryRow(trace: VtaTrace) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        SummaryMetric(label = "GPS", value = trace.pointCount.toString())
-        SummaryMetric(label = "Max", value = "%.0f km/h".format(trace.maxSpeedKmh))
-        SummaryMetric(label = "Avg", value = "%.0f km/h".format(trace.averageSpeedKmh))
-        SummaryMetric(label = "Sensor", value = trace.sensorCount.toString())
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            SummaryMetric(label = "Raw GPS", value = trace.rawGpsCount.toString())
+            SummaryMetric(label = "Trace", value = trace.pointCount.toString())
+            SummaryMetric(label = "Max", value = "%.0f km/h".format(trace.maxSpeedKmh))
+            SummaryMetric(label = "Sensor", value = trace.sensorCount.toString())
+        }
+        Text(
+            "Preset: ${trace.enhancementPreset.displayName} (${trace.enhancementPreset.outputHz}Hz, +${trace.enhancedPointCount} derived)",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -153,6 +161,10 @@ private fun LatestGpsDetails(point: GpsTracePoint?) {
         DetailRow(
             "Satellites" to point.satelliteCount.toString(),
             "Elapsed RT" to (point.elapsedRealtimeNanos?.let(::formatElapsedRealtime) ?: "--"),
+        )
+        DetailRow(
+            "Source" to point.source.label,
+            "Confidence" to String.format(Locale.US, "%.0f%%", point.confidence * 100.0),
         )
     }
 }
@@ -193,7 +205,7 @@ private fun RecentGpsFixes(points: List<GpsTracePoint>) {
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                "alt ${formatMeters(point.altitudeMeters)} / speed ${formatKmh(point.speedKmh)} / acc ${point.accuracyMeters?.let(::formatMeters) ?: "--"}",
+                "alt ${formatMeters(point.altitudeMeters)} / speed ${formatKmh(point.speedKmh)} / acc ${point.accuracyMeters?.let(::formatMeters) ?: "--"} / ${point.source.label}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -262,20 +274,23 @@ fun MetricLineChart(
 
 @Composable
 fun MapLibreRouteMap(
-    points: List<GpsTracePoint>,
+    trace: VtaTrace,
     modifier: Modifier = Modifier,
     followLatest: Boolean = false,
 ) {
+    val routePoints = trace.displayGpsPoints
+    val rawPoints = trace.gpsPoints
+    val enhancedPoints = trace.enhancedGpsPoints
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val useDarkMapStyle = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val mapView = remember(useDarkMapStyle) { createMapLibreMapView(context, useDarkMapStyle) }
     val routeState = remember(mapView) { MapLibreRouteState() }
-    val routeKey = remember(points, followLatest) {
-        val latest = points.lastOrNull()
-        val updateBucket = latest?.elapsedRealtimeNanos?.div(MAP_UPDATE_INTERVAL_NANOS) ?: points.size.toLong()
-        val first = points.firstOrNull()
-        "${points.size}:${updateBucket}:${first?.latitude}:${first?.longitude}:${latest?.latitude}:${latest?.longitude}:$followLatest"
+    val routeKey = remember(routePoints, rawPoints, enhancedPoints, followLatest) {
+        val latest = routePoints.lastOrNull()
+        val updateBucket = latest?.elapsedRealtimeNanos?.div(MAP_UPDATE_INTERVAL_NANOS) ?: routePoints.size.toLong()
+        val first = routePoints.firstOrNull()
+        "${routePoints.size}:${rawPoints.size}:${enhancedPoints.size}:${updateBucket}:${first?.latitude}:${first?.longitude}:${latest?.latitude}:${latest?.longitude}:$followLatest"
     }
 
     DisposableEffect(lifecycleOwner, mapView) {
@@ -301,7 +316,7 @@ fun MapLibreRouteMap(
     }
 
     LaunchedEffect(routeKey) {
-        updateMapLibreRoute(mapView, routeState, points, followLatest)
+        updateMapLibreRoute(mapView, routeState, routePoints, rawPoints, enhancedPoints, followLatest)
     }
 
     AndroidView(
@@ -337,15 +352,19 @@ private class MapLibreRouteState {
 private fun updateMapLibreRoute(
     mapView: MapView,
     state: MapLibreRouteState,
-    points: List<GpsTracePoint>,
+    routePoints: List<GpsTracePoint>,
+    rawPoints: List<GpsTracePoint>,
+    enhancedPoints: List<GpsTracePoint>,
     followLatest: Boolean,
 ) {
     mapView.getMapAsync { map ->
         map.getStyle { style ->
             ensureRouteLayers(style)
-            val visiblePoints = downsampleRoute(points)
-            updateRouteSources(style, visiblePoints)
-            updateRouteCamera(map, state, visiblePoints, followLatest)
+            val visibleRoutePoints = downsampleRoute(routePoints)
+            val visibleRawPoints = downsampleRoute(rawPoints)
+            val visibleEnhancedPoints = downsampleRoute(enhancedPoints)
+            updateRouteSources(style, visibleRoutePoints, visibleRawPoints, visibleEnhancedPoints)
+            updateRouteCamera(map, state, visibleRoutePoints, followLatest)
         }
     }
 }
@@ -353,6 +372,12 @@ private fun updateMapLibreRoute(
 private fun ensureRouteLayers(style: Style) {
     if (style.getSource(ROUTE_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(ROUTE_SOURCE_ID, emptyFeatureCollection()))
+    }
+    if (style.getSource(RAW_POINTS_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(RAW_POINTS_SOURCE_ID, emptyFeatureCollection()))
+    }
+    if (style.getSource(ENHANCED_POINTS_SOURCE_ID) == null) {
+        style.addSource(GeoJsonSource(ENHANCED_POINTS_SOURCE_ID, emptyFeatureCollection()))
     }
     if (style.getSource(START_SOURCE_ID) == null) {
         style.addSource(GeoJsonSource(START_SOURCE_ID, emptyFeatureCollection()))
@@ -365,6 +390,26 @@ private fun ensureRouteLayers(style: Style) {
             LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
                 lineColor("#5B50A4"),
                 lineWidth(5f),
+            ),
+        )
+    }
+    if (style.getLayer(ENHANCED_POINTS_LAYER_ID) == null) {
+        style.addLayer(
+            CircleLayer(ENHANCED_POINTS_LAYER_ID, ENHANCED_POINTS_SOURCE_ID).withProperties(
+                circleColor("#F9A825"),
+                circleRadius(3f),
+                circleStrokeColor("#4A3500"),
+                circleStrokeWidth(0.8f),
+            ),
+        )
+    }
+    if (style.getLayer(RAW_POINTS_LAYER_ID) == null) {
+        style.addLayer(
+            CircleLayer(RAW_POINTS_LAYER_ID, RAW_POINTS_SOURCE_ID).withProperties(
+                circleColor("#1565C0"),
+                circleRadius(4.5f),
+                circleStrokeColor("#FFFFFF"),
+                circleStrokeWidth(1.2f),
             ),
         )
     }
@@ -390,10 +435,17 @@ private fun ensureRouteLayers(style: Style) {
     }
 }
 
-private fun updateRouteSources(style: Style, points: List<GpsTracePoint>) {
-    style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)?.setGeoJson(routeFeatureCollection(points))
-    style.getSourceAs<GeoJsonSource>(START_SOURCE_ID)?.setGeoJson(pointFeatureCollection(points.firstOrNull()))
-    style.getSourceAs<GeoJsonSource>(LATEST_SOURCE_ID)?.setGeoJson(pointFeatureCollection(points.lastOrNull()))
+private fun updateRouteSources(
+    style: Style,
+    routePoints: List<GpsTracePoint>,
+    rawPoints: List<GpsTracePoint>,
+    enhancedPoints: List<GpsTracePoint>,
+) {
+    style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)?.setGeoJson(routeFeatureCollection(routePoints))
+    style.getSourceAs<GeoJsonSource>(RAW_POINTS_SOURCE_ID)?.setGeoJson(pointsFeatureCollection(rawPoints))
+    style.getSourceAs<GeoJsonSource>(ENHANCED_POINTS_SOURCE_ID)?.setGeoJson(pointsFeatureCollection(enhancedPoints))
+    style.getSourceAs<GeoJsonSource>(START_SOURCE_ID)?.setGeoJson(pointFeatureCollection(routePoints.firstOrNull()))
+    style.getSourceAs<GeoJsonSource>(LATEST_SOURCE_ID)?.setGeoJson(pointFeatureCollection(routePoints.lastOrNull()))
 }
 
 private fun updateRouteCamera(
@@ -451,6 +503,15 @@ private fun pointFeatureCollection(point: GpsTracePoint?): FeatureCollection {
     } ?: emptyFeatureCollection()
 }
 
+private fun pointsFeatureCollection(points: List<GpsTracePoint>): FeatureCollection {
+    if (points.isEmpty()) return emptyFeatureCollection()
+    return FeatureCollection.fromFeatures(
+        points.map { point ->
+            Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+        },
+    )
+}
+
 private fun emptyFeatureCollection(): FeatureCollection = FeatureCollection.fromFeatures(emptyList())
 
 private fun formatCoordinate(value: Double): String = String.format(Locale.US, "%.7f", value)
@@ -464,9 +525,13 @@ private fun formatDegrees(value: Double): String = String.format(Locale.US, "%.0
 private fun formatElapsedRealtime(value: Long): String = String.format(Locale.US, "%.3f s", value / 1_000_000_000.0)
 
 private const val ROUTE_SOURCE_ID = "vta-route-source"
+private const val RAW_POINTS_SOURCE_ID = "vta-raw-points-source"
+private const val ENHANCED_POINTS_SOURCE_ID = "vta-enhanced-points-source"
 private const val START_SOURCE_ID = "vta-start-source"
 private const val LATEST_SOURCE_ID = "vta-latest-source"
 private const val ROUTE_LAYER_ID = "vta-route-layer"
+private const val RAW_POINTS_LAYER_ID = "vta-raw-points-layer"
+private const val ENHANCED_POINTS_LAYER_ID = "vta-enhanced-points-layer"
 private const val START_LAYER_ID = "vta-start-layer"
 private const val LATEST_LAYER_ID = "vta-latest-layer"
 private const val LIVE_MAP_ZOOM = 16.0

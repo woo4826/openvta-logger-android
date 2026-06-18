@@ -12,17 +12,20 @@ import java.util.TimeZone
 
 class LiveTraceStore(
     private val maxGpsPoints: Int = 500,
+    private val maxEnhancedGpsPoints: Int = 2_000,
     private val maxSensorPoints: Int = 500,
 ) {
     private val dateFormat = SimpleDateFormat("ddMMyyyy", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
     private val timeFormat = SimpleDateFormat("HHmmss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
     private val gpsPoints = ArrayDeque<GpsTracePoint>()
+    private val enhancedGpsPoints = ArrayDeque<GpsTracePoint>()
     private val sensorPoints = ArrayDeque<SensorTracePoint>()
     private val lock = Any()
 
     fun clear() {
         synchronized(lock) {
             gpsPoints.clear()
+            enhancedGpsPoints.clear()
             sensorPoints.clear()
         }
     }
@@ -51,15 +54,34 @@ class LiveTraceStore(
         }
     }
 
+    fun appendEnhancedGps(points: List<GpsTracePoint>): VtaTrace {
+        synchronized(lock) {
+            points.forEach(enhancedGpsPoints::addLast)
+            trim(enhancedGpsPoints, maxEnhancedGpsPoints)
+            return snapshotLocked()
+        }
+    }
+
     fun appendSensor(sample: SensorSample) {
         synchronized(lock) {
             sensorPoints.addLast(
                 SensorTracePoint(
                     index = sample.index,
                     elapsedSeconds = sample.elapsedSeconds,
+                    orientationXDegrees = sample.snapshot.orientationX().toDouble(),
+                    orientationYDegrees = sample.snapshot.orientationY().toDouble(),
+                    orientationZDegrees = sample.snapshot.orientationZ().toDouble(),
                     accelX = sample.accelX().toDouble(),
                     accelY = sample.accelY().toDouble(),
                     accelZ = sample.accelZ().toDouble(),
+                    timestampNanos = sample.sensorTimestampNanos,
+                    accuracy = sample.sensorAccuracy,
+                    gyroXRadPerSecond = sample.snapshot.gyroX().toDouble(),
+                    gyroYRadPerSecond = sample.snapshot.gyroY().toDouble(),
+                    gyroZRadPerSecond = sample.snapshot.gyroZ().toDouble(),
+                    rotationAzimuthDegrees = sample.snapshot.rotationAzimuth().toDouble(),
+                    rotationPitchDegrees = sample.snapshot.rotationPitch().toDouble(),
+                    rotationRollDegrees = sample.snapshot.rotationRoll().toDouble(),
                 ),
             )
             trim(sensorPoints, maxSensorPoints)
@@ -72,6 +94,7 @@ class LiveTraceStore(
         sourceName = "Live recording",
         gpsPoints = gpsPoints.toList(),
         sensorPoints = sensorPoints.toList(),
+        enhancedGpsPoints = enhancedGpsPoints.toList(),
     )
 
     private fun <T> trim(points: ArrayDeque<T>, maxSize: Int) {

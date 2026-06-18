@@ -21,10 +21,13 @@ class VtaFormatter(
 
     fun header(): String = buildString {
         appendLine("%% VTALogger Kotlin Version: $appVersion")
-        appendLine("%% FormatVersion: 2")
+        appendLine("%% FormatVersion: 3")
         appendLine("% \$UTCDate,UTCTime,Latitude,Longitude,Altitude,Speed,Bearing,NumSat,AccuracyMeters,Provider,ElapsedRealtimeNanos")
-        appendLine("% #Idx,Time,Event,OX,OY,OZ,GX,GY,GZ,SensorTimestampNanos,SensorAccuracy")
+        appendLine("% @UTCDate,UTCTime,Latitude,Longitude,Altitude,Speed,Bearing,NumSat,AccuracyMeters,Provider,ElapsedRealtimeNanos,Source,Confidence,ImuPresetId,DerivedFromRawIndex")
+        appendLine("% #Idx,Time,Event,OX,OY,OZ,GX,GY,GZ,SensorTimestampNanos,SensorAccuracy,GyroX,GyroY,GyroZ,RotAzimuth,RotPitch,RotRoll")
     }
+
+    fun imuPresetHeader(presetId: String): String = "%% ImuPresetId: ${ImuEnhancementPresets.find(presetId).id}"
 
     fun footer(): String = "%% End"
 
@@ -59,6 +62,32 @@ class VtaFormatter(
             threeDecimals.format(sample.accelZ()),
             sample.sensorTimestampNanos.toString(),
             sample.sensorAccuracy.toString(),
+            threeDecimals.format(sample.snapshot.gyroX()),
+            threeDecimals.format(sample.snapshot.gyroY()),
+            threeDecimals.format(sample.snapshot.gyroZ()),
+            threeDecimals.format(sample.snapshot.rotationAzimuth()),
+            threeDecimals.format(sample.snapshot.rotationPitch()),
+            threeDecimals.format(sample.snapshot.rotationRoll()),
+        ).joinToString(",")
+    }
+
+    fun formatEnhancedGps(point: GpsTracePoint, presetId: String): String {
+        return listOf(
+            "@" + point.date,
+            point.time,
+            nineDecimals.format(point.latitude),
+            nineDecimals.format(point.longitude),
+            noDecimals.format(point.altitudeMeters),
+            noDecimals.format(point.speedKmh),
+            noDecimals.format(point.bearingDegrees),
+            noDecimals.format(point.satelliteCount),
+            point.accuracyMeters?.let { twoDecimals.format(it) } ?: "",
+            point.provider.orEmpty(),
+            point.elapsedRealtimeNanos?.toString().orEmpty(),
+            point.source.name,
+            threeDecimals.format(point.confidence.coerceIn(0.0, 1.0)),
+            ImuEnhancementPresets.find(presetId).id,
+            point.derivedFromRawIndex?.toString().orEmpty(),
         ).joinToString(",")
     }
 }

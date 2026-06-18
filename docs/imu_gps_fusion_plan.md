@@ -16,6 +16,7 @@ The app already stores the two key timing primitives needed for this work:
 - Long-running collection must happen from a foreground service when the app is not visible.
 - `Location.getBearing()` is movement direction, not phone orientation. Device orientation must come from rotation vector/gyro/magnetometer logic.
 - Phone mounting orientation is arbitrary. Vehicle-mode constraints need a calibration step before treating phone axes as vehicle axes.
+- `Location.getElapsedRealtimeNanos()` is used to order GPS fixes on Android's monotonic elapsed realtime clock. `SensorEvent.timestamp` uses the same clock basis for a given sensor, which makes interval alignment practical on modern Android.
 
 ## Source Basis
 
@@ -28,13 +29,14 @@ The app already stores the two key timing primitives needed for this work:
 
 ## Phase 1: Timestamp-Aligned Visualization Interpolation
 
-This is the lowest-risk improvement and should be implemented first.
+This is the lowest-risk improvement and is implemented in v0.0.2 as a bounded estimator rather than a raw GPS replacement.
 
 Goals:
 
 - Keep legacy `$` GPS and `#` sensor record semantics unchanged.
 - Render smoother live and saved-session paths at 5-10 Hz without pretending those points are raw GPS.
-- Label every generated point with `source = GPS` or `source = IMU_INTERP`.
+- Write generated points as separate `@` records with `Source`, `Confidence`, `ImuPresetId`, and `DerivedFromRawIndex`.
+- Keep `$` rows as the export authority for raw GPS analysis.
 
 Method:
 
@@ -45,17 +47,27 @@ Method:
 5. Use gyro yaw delta and rotation-vector heading as a smoothing hint, with low trust when magnetometer quality is poor.
 6. Clamp generated points to the next GPS fix so drift does not accumulate across intervals.
 
-Deliverables:
+Implemented presets:
 
-- `TraceEstimator` domain class with deterministic unit tests.
-- UI selector showing `GPS only` and `Smoothed`.
-- Saved-session visualization that can replay the same estimator offline.
-- Metrics: path smoothness, max interpolation deviation, CPU time, and battery impact.
+- `Raw GPS`: no generated `@` rows.
+- `Linear 5Hz`: time-aligned linear interpolation between adjacent GPS fixes.
+- `Hermite 10Hz`: cubic interpolation using GPS speed and bearing as endpoint velocity hints.
+- `IMU heading 10Hz`: Hermite path with rotation-vector/orientation heading hints and confidence reduction when heading is missing.
+- `IMU dead reckon 10Hz`: short-window inertial projection blended back toward the next GPS fix to bound drift.
+
+Export policy:
+
+- `$` rows: raw Android `LocationManager.GPS_PROVIDER` fixes only.
+- `@` rows: derived GPS-like estimates only.
+- `#` rows: raw accelerometer samples plus orientation, gyro, rotation-vector, timestamp, and accuracy extensions.
+- Session metadata stores the selected `imuPresetId`, and each `@` row repeats the preset id for standalone export analysis.
+- Map rendering uses the combined display path for the line, but raw and enhanced point markers are separate layers.
 
 Limitations:
 
 - This improves display smoothness more than absolute accuracy.
 - It should not be used as evidence that GPS itself is faster than the hardware reports.
+- IMU dead reckoning can drift quickly when the phone is moved independently from the vehicle or when heading is magnetically disturbed; the implementation clamps every generated interval back to the next raw GPS fix.
 
 ## Phase 2: Offline Evaluation Harness
 

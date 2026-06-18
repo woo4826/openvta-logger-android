@@ -295,6 +295,7 @@ if [[ "$VERIFY_REAL_FTP_UPLOAD" == "1" ]]; then
   "$ADB" shell am start -n "$ACTIVITY" \
     --ez debugApplySettings true \
     --es debugDriverId "CC00" \
+    --es debugImuPresetId "imu_heading_10hz" \
     --es debugFtpHost "$VTA_FTP_HOST" \
     --ei debugFtpPort "$VTA_FTP_PORT" \
     --es debugFtpUser "$VTA_FTP_USER" \
@@ -302,12 +303,21 @@ if [[ "$VERIFY_REAL_FTP_UPLOAD" == "1" ]]; then
     --ez debugPassiveMode true \
     --ez debugKeepLocalFiles true \
     --ez debugDarkMode false >/dev/null
-  sleep 1
+else
+  "$ADB" shell am start -n "$ACTIVITY" \
+    --ez debugApplySettings true \
+    --es debugDriverId "CC00" \
+    --es debugImuPresetId "imu_heading_10hz" \
+    --ez debugPassiveMode true \
+    --ez debugKeepLocalFiles true \
+    --ez debugDarkMode false >/dev/null
 fi
+sleep 1
 
 "$ADB" shell am start -n "$ACTIVITY"
 scroll_to_top
 wait_for_text "Start"
+wait_for_ui_contains "IMU preset: IMU heading 10Hz"
 "$ADB" emu geo fix 126.978000 37.566500 38 9 5.40 || true
 sleep 1
 tap_text "Start"
@@ -364,9 +374,12 @@ fi
 
 VTA_CONTENT="$("$ADB" shell "run-as $PACKAGE sh -c 'FILE=\$(ls -t files/vta/sessions/*.Vta | head -n 1); cat \"\$FILE\"'" | tr -d '\r')"
 grep -q '^%% VTALogger Kotlin Version' <<< "$VTA_CONTENT"
-grep -q '^%% FormatVersion: 2' <<< "$VTA_CONTENT"
+grep -Eq '^%% FormatVersion: [23]' <<< "$VTA_CONTENT"
 grep -q '^\$' <<< "$VTA_CONTENT"
+grep -q '^@' <<< "$VTA_CONTENT"
 grep -q '^#' <<< "$VTA_CONTENT"
+grep -q ',ImuHeading,' <<< "$VTA_CONTENT"
+grep -q ',imu_heading_10hz,' <<< "$VTA_CONTENT"
 grep -q '37.566' <<< "$VTA_CONTENT"
 grep -q '126.97' <<< "$VTA_CONTENT"
 grep -q '%% End' <<< "$VTA_CONTENT"
@@ -394,6 +407,17 @@ if [[ "$NON_ZERO_SPEED_COUNT" -lt 16 ]]; then
   echo "Expected at least 16 GPS rows with non-zero Speed, got $NON_ZERO_SPEED_COUNT." >&2
   exit 1
 fi
+ENHANCED_ROW_COUNT="$(awk -F, '/^@/ { count++ } END { print count + 0 }' <<< "$VTA_CONTENT")"
+if [[ "$ENHANCED_ROW_COUNT" -lt 20 ]]; then
+  echo "Expected at least 20 enhanced GPS rows from imu_heading_10hz, got $ENHANCED_ROW_COUNT." >&2
+  exit 1
+fi
+if ! awk -F, '/^@/ { if ($12 != "ImuHeading" || $14 != "imu_heading_10hz") bad++ } END { exit bad ? 1 : 0 }' <<< "$VTA_CONTENT"; then
+  echo "Enhanced rows did not preserve source/preset metadata." >&2
+  exit 1
+fi
+META_CONTENT="$("$ADB" shell "run-as $PACKAGE sh -c 'FILE=\$(ls -t files/vta/sessions/*.meta | head -n 1); cat \"\$FILE\"'" | tr -d '\r')"
+grep -q '^imuPresetId=imu_heading_10hz' <<< "$META_CONTENT"
 
 tap_bottom_nav Sessions
 wait_for_text "Recent sessions"
@@ -434,7 +458,7 @@ if [[ "$VERIFY_REAL_FTP_UPLOAD" == "1" ]]; then
     exit 1
   fi
 else
-  wait_for_ui_contains "FTP host is not configured"
+  wait_for_ui_regex "FTP (host|user) is not configured"
 fi
 
 tap_text_with_scroll "View"
