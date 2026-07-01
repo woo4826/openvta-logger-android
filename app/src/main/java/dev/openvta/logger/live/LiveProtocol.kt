@@ -12,7 +12,8 @@ object LiveProtocol {
         settings.liveEnabled &&
             settings.liveBaseUrl.isNotBlank() &&
             settings.liveTenantId.isNotBlank() &&
-            settings.liveDeviceId.isNotBlank()
+            settings.liveDeviceId.isNotBlank() &&
+            settings.liveApiCredential.isNotBlank()
 
     fun telemetryEnvelope(
         settings: AppSettings,
@@ -22,9 +23,10 @@ object LiveProtocol {
         sentAtMillis: Long = System.currentTimeMillis(),
     ): LiveEnvelope {
         val recordedAt = Instant.ofEpochMilli(sample.timeMillis).toString()
+        val accuracyJson = sample.accuracyMeters?.let { String.format(Locale.US, ""","accuracy":%.3f""", it) } ?: ""
         val pointJson = String.format(
             Locale.US,
-            """{"seq":%d,"recordedAt":"%s","lat":%.9f,"lon":%.9f,"speed":%.3f,"heading":%.3f,"altitude":%.3f,"accuracy":%s,"satelliteCount":%d,"source":"RawGps"}""",
+            """{"seq":%d,"recordedAt":"%s","lat":%.9f,"lon":%.9f,"speed":%.3f,"heading":%.3f,"altitude":%.3f,"satelliteCount":%d%s,"source":"RawGps"}""",
             seq,
             recordedAt,
             sample.latitude,
@@ -32,8 +34,8 @@ object LiveProtocol {
             sample.speedMetersPerSecond * 3.6,
             sample.bearingDegrees,
             sample.altitudeMeters,
-            sample.accuracyMeters?.let { String.format(Locale.US, "%.3f", it) } ?: "null",
             sample.satelliteCount,
+            accuracyJson,
         )
         val payloadJson = """{"points":[$pointJson]}"""
         val payloadHash = sha256(payloadJson)
@@ -54,7 +56,11 @@ object LiveProtocol {
     }
 
     fun sha256(payload: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+        return sha256(payload.toByteArray(Charsets.UTF_8))
+    }
+
+    fun sha256(payload: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(payload)
         return "sha256:" + digest.joinToString("") { "%02x".format(it) }
     }
 }

@@ -84,6 +84,7 @@ import dev.openvta.logger.domain.SessionVisualization
 import dev.openvta.logger.domain.UploadState
 import dev.openvta.logger.domain.VtaLogParser
 import dev.openvta.logger.domain.VtaTraceEnhancer
+import dev.openvta.logger.live.LiveRegistrationClient
 import dev.openvta.logger.recording.RecordingForegroundService
 import dev.openvta.logger.ui.VisualizationCard
 import dev.openvta.logger.upload.UploadWorker
@@ -211,6 +212,9 @@ private fun OpenVtaLoggerAppScreen(
     }
     val coroutineScope = rememberCoroutineScope()
     var busySessionId by remember { mutableStateOf<String?>(null) }
+    var liveRegistrationToken by remember { mutableStateOf("") }
+    var liveRegistrationBusy by remember { mutableStateOf(false) }
+    val liveRegistrationClient = remember { LiveRegistrationClient() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -381,7 +385,46 @@ private fun OpenVtaLoggerAppScreen(
                 modifier = contentModifier,
                 settings = settings,
                 message = status.lastMessage,
+                liveRegistrationToken = liveRegistrationToken,
+                liveRegistrationBusy = liveRegistrationBusy,
                 onSettingsChange = onSettingsChange,
+                onLiveRegistrationTokenChange = { liveRegistrationToken = it },
+                onRegisterLive = {
+                    val token = liveRegistrationToken.trim()
+                    if (token.isNotBlank() && !liveRegistrationBusy) {
+                        coroutineScope.launch {
+                            liveRegistrationBusy = true
+                            try {
+                                val baseUrl = settings.liveBaseUrl
+                                val displayName = listOf(Build.MANUFACTURER, Build.MODEL)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ")
+                                    .ifBlank { "Android device" }
+                                val result = withContext(Dispatchers.IO) {
+                                    liveRegistrationClient.consumeToken(baseUrl, token, displayName, BuildConfig.VERSION_NAME)
+                                }
+                                val updated = settings.copy(
+                                    liveEnabled = true,
+                                    liveTenantId = result.tenantId,
+                                    liveDeviceId = result.deviceId,
+                                    liveMqttCredential = result.mqttCredential,
+                                    liveWssCredential = result.wssCredential,
+                                    liveApiCredential = result.apiCredential,
+                                )
+                                onSettingsChange(updated)
+                                withContext(Dispatchers.IO) {
+                                    app.container.settingsRepository.save(updated)
+                                }
+                                liveRegistrationToken = ""
+                                app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
+                            } catch (exception: Exception) {
+                                app.container.updateStatus { it.copy(lastMessage = "Live registration failed: ${exception.message}") }
+                            } finally {
+                                liveRegistrationBusy = false
+                            }
+                        }
+                    }
+                },
                 onSave = {
                     app.container.settingsRepository.save(settings)
                     app.container.updateStatus { it.copy(lastMessage = "Settings saved") }
@@ -556,7 +599,11 @@ private fun SettingsScreen(
     modifier: Modifier,
     settings: AppSettings,
     message: String,
+    liveRegistrationToken: String,
+    liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
+    onLiveRegistrationTokenChange: (String) -> Unit,
+    onRegisterLive: () -> Unit,
     onSave: () -> Unit,
 ) {
     LazyColumn(
@@ -567,7 +614,11 @@ private fun SettingsScreen(
             SettingsCard(
                 settings = settings,
                 message = message,
+                liveRegistrationToken = liveRegistrationToken,
+                liveRegistrationBusy = liveRegistrationBusy,
                 onSettingsChange = onSettingsChange,
+                onLiveRegistrationTokenChange = onLiveRegistrationTokenChange,
+                onRegisterLive = onRegisterLive,
                 onSave = onSave,
             )
         }
@@ -647,7 +698,11 @@ private fun formatDashboardMeters(value: Double): String = String.format(Locale.
 private fun SettingsCard(
     settings: AppSettings,
     message: String,
+    liveRegistrationToken: String,
+    liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
+    onLiveRegistrationTokenChange: (String) -> Unit,
+    onRegisterLive: () -> Unit,
     onSave: () -> Unit,
 ) {
     Card {
@@ -716,6 +771,22 @@ private fun SettingsCard(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
+            OutlinedTextField(
+                value = liveRegistrationToken,
+                onValueChange = onLiveRegistrationTokenChange,
+                label = { Text("Live registration token") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Button(
+                onClick = onRegisterLive,
+                enabled = liveRegistrationToken.isNotBlank() && settings.liveBaseUrl.isNotBlank() && !liveRegistrationBusy,
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (liveRegistrationBusy) "Registering" else "Register")
+            }
             OutlinedTextField(
                 value = settings.liveTenantId,
                 onValueChange = { onSettingsChange(settings.copy(liveTenantId = it)) },

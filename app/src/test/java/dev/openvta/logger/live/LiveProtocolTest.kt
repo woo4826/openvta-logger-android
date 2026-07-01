@@ -14,6 +14,7 @@ class LiveProtocolTest {
         liveTenantId = "tenant_01",
         liveDeviceId = "device_01",
         liveBaseUrl = "https://openvta-live.kro.kr",
+        liveApiCredential = "api_secret",
     )
     private val session = RecordingSession(
         id = "recording_01",
@@ -28,6 +29,7 @@ class LiveProtocolTest {
         assertTrue(LiveProtocol.isConfigured(settings))
         assertEquals(false, LiveProtocol.isConfigured(settings.copy(liveEnabled = false)))
         assertEquals(false, LiveProtocol.isConfigured(settings.copy(liveDeviceId = "")))
+        assertEquals(false, LiveProtocol.isConfigured(settings.copy(liveApiCredential = "")))
     }
 
     @Test
