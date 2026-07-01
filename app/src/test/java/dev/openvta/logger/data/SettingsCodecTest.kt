@@ -18,6 +18,13 @@ class SettingsCodecTest {
             keepLocalFiles = false,
             darkMode = true,
             imuPresetId = "imu_heading_10hz",
+            liveEnabled = true,
+            liveBaseUrl = "https://openvta-live.kro.kr",
+            liveTenantId = "tenant_01",
+            liveDeviceId = "device_01",
+            liveMqttCredential = "mqtt_secret",
+            liveWssCredential = "wss_secret",
+            liveApiCredential = "api_secret",
         )
 
         val decoded = SettingsCodec.decode(SettingsCodec.encode(settings))

@@ -124,6 +124,7 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
             startedAtMillis = startedAtMillis,
             imuPresetId = settings.imuPresetId,
         )
+        session?.let(app.container.liveUpstreamManager::onRecordingStarted)
         app.container.liveTraceStore.clear()
 
         acquireWakeLock()
@@ -147,6 +148,7 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         val activeSession = session
         if (activeSession != null) {
             val closed = app.container.recordingRepository.closeSession(activeSession)
+            app.container.liveUpstreamManager.onRecordingStopped(closed)
             app.container.updateStatus {
                 it.copy(
                     isRecording = false,
@@ -284,6 +286,7 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
             val previousRawPoint = lastRecordedGpsPoint
             val previousRawIndex = recordedGpsPointCount - 1
             app.container.recordingRepository.appendGps(activeSession, sample)
+            app.container.liveUpstreamManager.enqueueGps(activeSession, sample, gpsFixCount)
             recordedGpsPointCount += 1
 
             val preset = ImuEnhancementPresets.find(activeSession.imuPresetId)

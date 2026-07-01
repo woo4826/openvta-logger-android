@@ -4,6 +4,8 @@ import android.app.Application
 import dev.openvta.logger.data.RecordingRepository
 import dev.openvta.logger.data.SecureSettingsRepository
 import dev.openvta.logger.domain.RecordingStatus
+import dev.openvta.logger.live.LiveOutboxRepository
+import dev.openvta.logger.live.LiveUpstreamManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -28,6 +30,8 @@ class AppContainer(app: Application) {
     val settingsRepository = SecureSettingsRepository(app)
     val recordingRepository = RecordingRepository(app)
     val liveTraceStore = dev.openvta.logger.data.LiveTraceStore()
+    val liveOutboxRepository = LiveOutboxRepository(app.filesDir)
+    val liveUpstreamManager = LiveUpstreamManager(settingsRepository, liveOutboxRepository)
 
     private val mutableStatus = MutableStateFlow(RecordingStatus())
     val status: StateFlow<RecordingStatus> = mutableStatus

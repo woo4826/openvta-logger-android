@@ -12,6 +12,13 @@ data class AppSettings(
     val keepLocalFiles: Boolean = true,
     val darkMode: Boolean = false,
     val imuPresetId: String = ImuEnhancementPresets.DEFAULT_ID,
+    val liveEnabled: Boolean = false,
+    val liveBaseUrl: String = "https://openvta-live.kro.kr",
+    val liveTenantId: String = "",
+    val liveDeviceId: String = "",
+    val liveMqttCredential: String = "",
+    val liveWssCredential: String = "",
+    val liveApiCredential: String = "",
 )
 
 enum class UploadState {

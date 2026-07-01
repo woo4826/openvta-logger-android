@@ -18,6 +18,13 @@ object SettingsCodec {
         properties.setProperty("keepLocalFiles", settings.keepLocalFiles.toString())
         properties.setProperty("darkMode", settings.darkMode.toString())
         properties.setProperty("imuPresetId", ImuEnhancementPresets.find(settings.imuPresetId).id)
+        properties.setProperty("liveEnabled", settings.liveEnabled.toString())
+        properties.setProperty("liveBaseUrl", settings.liveBaseUrl)
+        properties.setProperty("liveTenantId", settings.liveTenantId)
+        properties.setProperty("liveDeviceId", settings.liveDeviceId)
+        properties.setProperty("liveMqttCredential", settings.liveMqttCredential)
+        properties.setProperty("liveWssCredential", settings.liveWssCredential)
+        properties.setProperty("liveApiCredential", settings.liveApiCredential)
         return StringWriter().use { writer ->
             properties.store(writer, "OpenVTA Logger encrypted settings")
             writer.toString()
@@ -37,6 +44,13 @@ object SettingsCodec {
             keepLocalFiles = properties.getProperty("keepLocalFiles", "true").toBooleanStrictOrNull() ?: true,
             darkMode = properties.getProperty("darkMode", "false").toBooleanStrictOrNull() ?: false,
             imuPresetId = ImuEnhancementPresets.find(properties.getProperty("imuPresetId")).id,
+            liveEnabled = properties.getProperty("liveEnabled", "false").toBooleanStrictOrNull() ?: false,
+            liveBaseUrl = properties.getProperty("liveBaseUrl", "https://openvta-live.kro.kr"),
+            liveTenantId = properties.getProperty("liveTenantId", ""),
+            liveDeviceId = properties.getProperty("liveDeviceId", ""),
+            liveMqttCredential = properties.getProperty("liveMqttCredential", ""),
+            liveWssCredential = properties.getProperty("liveWssCredential", ""),
+            liveApiCredential = properties.getProperty("liveApiCredential", ""),
         )
     }
 }

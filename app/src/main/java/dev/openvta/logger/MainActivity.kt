@@ -696,6 +696,54 @@ private fun SettingsCard(
                     onSettingsChange(settings.copy(imuPresetId = preset.id))
                 },
             )
+            HorizontalDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSettingsChange(settings.copy(liveEnabled = !settings.liveEnabled)) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = settings.liveEnabled,
+                    onCheckedChange = { onSettingsChange(settings.copy(liveEnabled = it)) },
+                )
+                Text("OpenVTA Live upstream")
+            }
+            OutlinedTextField(
+                value = settings.liveBaseUrl,
+                onValueChange = { onSettingsChange(settings.copy(liveBaseUrl = it)) },
+                label = { Text("Live server URL") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = settings.liveTenantId,
+                onValueChange = { onSettingsChange(settings.copy(liveTenantId = it)) },
+                label = { Text("Live tenant ID") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = settings.liveDeviceId,
+                onValueChange = { onSettingsChange(settings.copy(liveDeviceId = it)) },
+                label = { Text("Live device ID") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = settings.liveApiCredential,
+                onValueChange = { onSettingsChange(settings.copy(liveApiCredential = it)) },
+                label = { Text("Live API credential") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Text(
+                "Live is opt-in. Until a device is registered by QR or manual token, local VTA files and FTP behavior stay unchanged.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HorizontalDivider()
             OutlinedTextField(
                 value = settings.ftpHost,
                 onValueChange = { onSettingsChange(settings.copy(ftpHost = it)) },
