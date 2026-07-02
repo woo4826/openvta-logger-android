@@ -1,10 +1,12 @@
 package dev.openvta.logger.live
 
 import dev.openvta.logger.domain.AppSettings
+import dev.openvta.logger.domain.RecordingSession
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import java.util.concurrent.Executor
 
 class LiveUpstreamManagerTest {
@@ -45,6 +47,48 @@ class LiveUpstreamManagerTest {
 
         assertEquals(1, manager.flushPending())
         assertEquals(1, deliveredIds.size)
+        assertEquals(0, manager.pendingCount())
+    }
+
+    @Test
+    fun recordingStopPublishesStatusChunkMetadataAndManifest() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = AppSettings(
+            liveEnabled = true,
+            liveBaseUrl = "https://openvta-live.kro.kr",
+            liveTenantId = "tenant_01",
+            liveDeviceId = "device_01",
+            liveMqttCredential = "mqtt_secret",
+            liveApiCredential = "api_secret",
+        )
+        val deliveredKinds = mutableListOf<String>()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                    deliveredKinds += entry.kind
+                    return true
+                }
+            },
+            vtaUploadClient = object : LiveVtaUploadClient {
+                override fun uploadVta(settings: AppSettings, session: RecordingSession): Boolean = true
+            },
+            commandClient = LiveCommandClient(),
+            executor = Executor { it.run() },
+        )
+        val vtaFile = temporaryFolder.newFile("recording_01.Vta").apply { writeText("VTA\nGPS\n") }
+        val session = RecordingSession(
+            id = "recording_01",
+            driverId = "CC00",
+            startedAtMillis = 1L,
+            vtaFile = vtaFile,
+            zipFile = File(temporaryFolder.root, "recording_01.Zip"),
+        )
+
+        manager.onRecordingStopped(session)
+
+        assertEquals(listOf("status", "chunk-meta", "manifest"), deliveredKinds)
         assertEquals(0, manager.pendingCount())
     }
 }

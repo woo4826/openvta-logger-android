@@ -4,10 +4,26 @@ import java.io.File
 import java.util.Properties
 import java.util.UUID
 
-class LiveOutboxRepository(rootDir: File) {
+interface LiveOutboxStore {
+    fun enqueue(
+        kind: String,
+        recordingId: String,
+        seqStart: Long,
+        seqEnd: Long,
+        payloadHash: String,
+        payloadJson: String,
+    ): LiveOutboxEntry
+
+    fun listPending(): List<LiveOutboxEntry>
+    fun markSent(id: String)
+    fun markAcked(id: String)
+    fun markFailed(id: String)
+}
+
+class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
     private val outboxDir = File(rootDir, "vta/live-outbox").apply { mkdirs() }
 
-    fun enqueue(
+    override fun enqueue(
         kind: String,
         recordingId: String,
         seqStart: Long,
@@ -30,16 +46,26 @@ class LiveOutboxRepository(rootDir: File) {
         return entry
     }
 
-    fun listPending(): List<LiveOutboxEntry> =
+    override fun listPending(): List<LiveOutboxEntry> =
         outboxDir.listFiles { file -> file.extension == "properties" }
             ?.mapNotNull(::read)
-            ?.filter { it.status == LiveOutboxStatus.Pending || it.status == LiveOutboxStatus.Sent }
+            ?.filter { it.status == LiveOutboxStatus.Pending || it.status == LiveOutboxStatus.Sent || it.status == LiveOutboxStatus.Failed }
             ?.sortedBy { it.createdAtMillis }
             ?: emptyList()
 
-    fun markAcked(id: String) {
+    override fun markSent(id: String) {
         val entry = read(File(outboxDir, "$id.properties")) ?: return
-        write(entry.copy(status = LiveOutboxStatus.Acked))
+        write(entry.copy(status = LiveOutboxStatus.Sent, updatedAtMillis = System.currentTimeMillis()))
+    }
+
+    override fun markAcked(id: String) {
+        val entry = read(File(outboxDir, "$id.properties")) ?: return
+        write(entry.copy(status = LiveOutboxStatus.Acked, updatedAtMillis = System.currentTimeMillis()))
+    }
+
+    override fun markFailed(id: String) {
+        val entry = read(File(outboxDir, "$id.properties")) ?: return
+        write(entry.copy(status = LiveOutboxStatus.Failed, updatedAtMillis = System.currentTimeMillis()))
     }
 
     private fun write(entry: LiveOutboxEntry) {
@@ -53,6 +79,7 @@ class LiveOutboxRepository(rootDir: File) {
         properties.setProperty("payloadJson", entry.payloadJson)
         properties.setProperty("status", entry.status.name)
         properties.setProperty("createdAtMillis", entry.createdAtMillis.toString())
+        properties.setProperty("updatedAtMillis", entry.updatedAtMillis.toString())
         File(outboxDir, "${entry.id}.properties").outputStream().use {
             properties.store(it, "OpenVTA Live outbox entry")
         }
@@ -72,6 +99,7 @@ class LiveOutboxRepository(rootDir: File) {
             status = properties.getProperty("status")?.let { runCatching { LiveOutboxStatus.valueOf(it) }.getOrNull() }
                 ?: LiveOutboxStatus.Pending,
             createdAtMillis = properties.getProperty("createdAtMillis", "0").toLongOrNull() ?: 0L,
+            updatedAtMillis = properties.getProperty("updatedAtMillis", "0").toLongOrNull() ?: 0L,
         )
     }
 }
@@ -86,6 +114,7 @@ data class LiveOutboxEntry(
     val payloadJson: String,
     val status: LiveOutboxStatus,
     val createdAtMillis: Long,
+    val updatedAtMillis: Long = createdAtMillis,
 )
 
 enum class LiveOutboxStatus {

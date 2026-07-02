@@ -29,6 +29,12 @@ class LiveOutboxRepositoryTest {
         assertEquals("recording_01", pending.first().recordingId)
         assertTrue(pending.first().payloadJson.contains("payload"))
 
+        repository.markSent(entry.id)
+        assertEquals(LiveOutboxStatus.Sent, repository.listPending().first().status)
+
+        repository.markFailed(entry.id)
+        assertEquals(LiveOutboxStatus.Failed, repository.listPending().first().status)
+
         repository.markAcked(entry.id)
 
         assertEquals(emptyList<LiveOutboxEntry>(), repository.listPending())

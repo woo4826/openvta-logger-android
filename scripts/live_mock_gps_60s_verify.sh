@@ -207,6 +207,16 @@ inject_mock_route() {
 }
 
 live_outbox_statuses() {
+  local room_db="$ARTIFACT_DIR/live_outbox.db"
+  if adb_device shell "run-as $PACKAGE test -f databases/openvta-live-outbox.db" >/dev/null 2>&1; then
+    adb_device exec-out run-as "$PACKAGE" cat databases/openvta-live-outbox.db > "$room_db" || true
+    if [[ -s "$room_db" ]]; then
+      sqlite3 "$room_db" "SELECT COUNT(*), status FROM live_outbox GROUP BY status ORDER BY status;" 2>/dev/null \
+        | awk -F'|' '{ print $1 " " $2 }'
+      return
+    fi
+  fi
+
   adb_device shell "run-as $PACKAGE sh -c 'if ls files/vta/live-outbox/*.properties >/dev/null 2>&1; then grep -h \"^status=\" files/vta/live-outbox/*.properties | cut -d= -f2 | sort | uniq -c; fi'" | tr -d '\r'
 }
 

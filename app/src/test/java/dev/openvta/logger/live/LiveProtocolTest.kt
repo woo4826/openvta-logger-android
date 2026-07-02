@@ -61,4 +61,30 @@ class LiveProtocolTest {
         assertTrue(envelope.payloadJson.contains("\"stream\":\"telemetry\""))
         assertTrue(envelope.payloadJson.contains("\"lat\":37.566500000"))
     }
+
+    @Test
+    fun chunkMetadataAndManifestUseRecordingStreams() {
+        val chunk = LiveVtaChunkMetadata(
+            chunkId = "chunk-000001",
+            seqStart = 0,
+            seqEnd = 7,
+            sha256 = LiveProtocol.sha256("VTA\nGPS\n"),
+            sizeBytes = 8,
+        )
+
+        val chunkMeta = LiveProtocol.chunkMetadataEnvelope(settings, session, chunk, sentAtMillis = 1_577_836_802_000L)
+        val manifest = LiveProtocol.manifestEnvelope(
+            settings = settings,
+            session = session,
+            chunks = listOf(chunk),
+            finalVtaSha256 = chunk.sha256,
+            sentAtMillis = 1_577_836_803_000L,
+        )
+
+        assertTrue(chunkMeta.payloadJson.contains("\"stream\":\"chunk-meta\""))
+        assertTrue(chunkMeta.payloadJson.contains("\"chunkId\":\"chunk-000001\""))
+        assertTrue(chunkMeta.payloadJson.contains("\"upload\""))
+        assertTrue(manifest.payloadJson.contains("\"stream\":\"manifest\""))
+        assertTrue(manifest.payloadJson.contains("\"finalVtaSha256\""))
+    }
 }

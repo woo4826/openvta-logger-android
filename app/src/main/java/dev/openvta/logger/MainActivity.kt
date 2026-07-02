@@ -433,6 +433,7 @@ private fun OpenVtaLoggerAppScreen(
                                 withContext(Dispatchers.IO) {
                                     app.container.settingsRepository.save(updated)
                                 }
+                                app.container.liveUpstreamManager.refreshCommandConnection()
                                 liveRegistrationToken = ""
                                 app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
                             } catch (exception: Exception) {
@@ -445,6 +446,7 @@ private fun OpenVtaLoggerAppScreen(
                 },
                 onSave = {
                     app.container.settingsRepository.save(settings)
+                    app.container.liveUpstreamManager.refreshCommandConnection()
                     app.container.updateStatus { it.copy(lastMessage = "Settings saved") }
                 },
             )

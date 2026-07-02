@@ -3,6 +3,8 @@ package dev.openvta.logger.live
 import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.GpsSample
 import dev.openvta.logger.domain.RecordingSession
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Locale
@@ -55,6 +57,98 @@ object LiveProtocol {
         return LiveEnvelope(session.id, 0, 0, payloadHash, envelopeJson)
     }
 
+    fun chunkMetadataEnvelope(
+        settings: AppSettings,
+        session: RecordingSession,
+        chunk: LiveVtaChunkMetadata,
+        sentAtMillis: Long = System.currentTimeMillis(),
+    ): LiveEnvelope {
+        val uploadPath = "/api/devices/${settings.liveDeviceId}/recordings/${session.id}/chunks/${chunk.chunkId}"
+        val payload = JSONObject()
+            .put("recordingId", session.id)
+            .put("chunkId", chunk.chunkId)
+            .put("seqStart", chunk.seqStart)
+            .put("seqEnd", chunk.seqEnd)
+            .put("sha256", chunk.sha256)
+            .put("sizeBytes", chunk.sizeBytes)
+            .put("compression", "none")
+            .put("upload", JSONObject().put("method", "http").put("path", uploadPath))
+        return envelope(
+            settings = settings,
+            session = session,
+            stream = "chunk-meta",
+            seqStart = chunk.seqStart,
+            seqEnd = chunk.seqEnd,
+            payload = payload,
+            sentAtMillis = sentAtMillis,
+        )
+    }
+
+    fun manifestEnvelope(
+        settings: AppSettings,
+        session: RecordingSession,
+        chunks: List<LiveVtaChunkMetadata>,
+        finalVtaSha256: String,
+        status: String = "completed",
+        sentAtMillis: Long = System.currentTimeMillis(),
+    ): LiveEnvelope {
+        val seqStart = chunks.minOfOrNull { it.seqStart } ?: 0L
+        val seqEnd = chunks.maxOfOrNull { it.seqEnd } ?: 0L
+        val segments = JSONArray()
+        chunks.forEach { chunk ->
+            segments.put(
+                JSONObject()
+                    .put("chunkId", chunk.chunkId)
+                    .put("seqStart", chunk.seqStart)
+                    .put("seqEnd", chunk.seqEnd)
+                    .put("sha256", chunk.sha256)
+                    .put("sizeBytes", chunk.sizeBytes),
+            )
+        }
+        val payload = JSONObject()
+            .put("recordingId", session.id)
+            .put("status", status)
+            .put("sampleCount", seqEnd)
+            .put("segments", segments)
+            .put("finalVtaSha256", finalVtaSha256)
+        return envelope(
+            settings = settings,
+            session = session,
+            stream = "manifest",
+            seqStart = seqStart,
+            seqEnd = seqEnd,
+            payload = payload,
+            sentAtMillis = sentAtMillis,
+        )
+    }
+
+    private fun envelope(
+        settings: AppSettings,
+        session: RecordingSession,
+        stream: String,
+        seqStart: Long,
+        seqEnd: Long,
+        payload: JSONObject,
+        sentAtMillis: Long,
+    ): LiveEnvelope {
+        val payloadJson = payload.toString()
+        val payloadHash = sha256(payloadJson)
+        val sentAt = Instant.ofEpochMilli(sentAtMillis).toString()
+        val envelope = JSONObject()
+            .put("v", 1)
+            .put("msgId", "android-${session.id}-$stream-$seqStart-$seqEnd")
+            .put("tenantId", settings.liveTenantId)
+            .put("deviceId", settings.liveDeviceId)
+            .put("recordingId", session.id)
+            .put("stream", stream)
+            .put("seqStart", seqStart)
+            .put("seqEnd", seqEnd)
+            .put("sentAt", sentAt)
+            .put("payloadHash", payloadHash)
+            .put("payload", payload)
+        return LiveEnvelope(session.id, seqStart, seqEnd, payloadHash, envelope.toString())
+    }
+
     fun sha256(payload: String): String {
         return sha256(payload.toByteArray(Charsets.UTF_8))
     }
@@ -71,4 +165,12 @@ data class LiveEnvelope(
     val seqEnd: Long,
     val payloadHash: String,
     val payloadJson: String,
+)
+
+data class LiveVtaChunkMetadata(
+    val chunkId: String,
+    val seqStart: Long,
+    val seqEnd: Long,
+    val sha256: String,
+    val sizeBytes: Long,
 )
