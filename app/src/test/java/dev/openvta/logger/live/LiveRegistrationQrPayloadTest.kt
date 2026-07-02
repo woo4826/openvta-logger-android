@@ -21,4 +21,15 @@ class LiveRegistrationQrPayloadTest {
             LiveRegistrationQrPayload.parse("""{"type":"openvta-live-registration","token":"ovta_reg_123"}""")
         }
     }
+
+    @Test
+    fun parsesManualRegistrationCode() {
+        val payload = LiveRegistrationQrPayload.fromManual(
+            baseUrl = " https://openvta-live.kro.kr/ ",
+            token = " ovta_reg_manual ",
+        )
+
+        assertEquals("https://openvta-live.kro.kr", payload.baseUrl)
+        assertEquals("ovta_reg_manual", payload.token)
+    }
 }

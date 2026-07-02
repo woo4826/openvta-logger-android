@@ -32,7 +32,7 @@ class LiveHybridSyncClient(
     private val httpFallback: LiveSyncClient = LiveHttpSyncClient(),
 ) : LiveSyncClient {
     override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean =
-        mqttClient.send(settings, entry) || httpFallback.send(settings, entry)
+        httpFallback.send(settings, entry) || runCatching { mqttClient.send(settings, entry) }.getOrDefault(false)
 }
 
 interface LiveMqttPublisher {

@@ -22,7 +22,14 @@ class LiveRegistrationClient {
             .put("platform", "android")
             .toString()
         OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body) }
-        val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+        val responseCode = connection.responseCode
+        val responseText = if (responseCode in 200..299) {
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } else {
+            val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val message = runCatching { JSONObject(errorText).optString("error") }.getOrNull()?.takeIf { it.isNotBlank() }
+            throw IllegalStateException(message ?: "Live registration failed with HTTP $responseCode")
+        }
         val response = JSONObject(responseText)
         val device = response.getJSONObject("device")
         val credentials = response.getJSONObject("credentials")
@@ -45,11 +52,18 @@ data class LiveRegistrationQrPayload(
             val json = JSONObject(raw)
             val type = json.optString("type")
             require(type == TYPE) { "not an OpenVTA Live QR" }
-            val baseUrl = json.optString("baseUrl").trim().trimEnd('/')
-            val token = json.optString("token").trim()
-            require(baseUrl.startsWith("https://") || baseUrl.startsWith("http://")) { "QR is missing Live server URL" }
-            require(token.isNotBlank()) { "QR is missing registration token" }
-            return LiveRegistrationQrPayload(baseUrl = baseUrl, token = token)
+            return fromManual(
+                baseUrl = json.optString("baseUrl"),
+                token = json.optString("token"),
+            )
+        }
+
+        fun fromManual(baseUrl: String, token: String): LiveRegistrationQrPayload {
+            val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+            val normalizedToken = token.trim()
+            require(normalizedBaseUrl.startsWith("https://") || normalizedBaseUrl.startsWith("http://")) { "Live server URL must start with http:// or https://" }
+            require(normalizedToken.isNotBlank()) { "Live registration code is required" }
+            return LiveRegistrationQrPayload(baseUrl = normalizedBaseUrl, token = normalizedToken)
         }
 
         const val TYPE = "openvta-live-registration"

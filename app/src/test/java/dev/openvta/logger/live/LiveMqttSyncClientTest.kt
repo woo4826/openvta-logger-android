@@ -60,6 +60,39 @@ class LiveMqttSyncClientTest {
         assertEquals("vta/tenant_01/device_01/recording/recording_01/chunk-meta", publisher.topic)
     }
 
+    @Test
+    fun hybridUsesHttpBeforeMqttFallback() {
+        val calls = mutableListOf<String>()
+        val entry = LiveOutboxEntry(
+            id = "entry_03",
+            kind = "telemetry",
+            recordingId = "recording_01",
+            seqStart = 1,
+            seqEnd = 1,
+            payloadHash = "sha256:abc",
+            payloadJson = """{"stream":"telemetry","recordingId":"recording_01","payload":{"points":[]}}""",
+            status = LiveOutboxStatus.Pending,
+            createdAtMillis = 1L,
+        )
+        val client = LiveHybridSyncClient(
+            mqttClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                    calls += "mqtt"
+                    error("mqtt unavailable")
+                }
+            },
+            httpFallback = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                    calls += "http"
+                    return true
+                }
+            },
+        )
+
+        assertTrue(client.send(settings, entry))
+        assertEquals(listOf("http"), calls)
+    }
+
     private class CapturingPublisher : LiveMqttPublisher {
         var serverUri = ""
         var username = ""

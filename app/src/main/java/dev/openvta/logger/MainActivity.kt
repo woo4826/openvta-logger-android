@@ -236,12 +236,11 @@ private fun OpenVtaLoggerAppScreen(
     var liveRegistrationBusy by remember { mutableStateOf(false) }
     val liveRegistrationClient = remember { LiveRegistrationClient() }
 
-    val registerLiveFromQr: (String) -> Unit = { rawQr ->
+    fun registerLivePayload(payload: LiveRegistrationQrPayload, sourceLabel: String) {
         if (!liveRegistrationBusy) {
             coroutineScope.launch {
                 liveRegistrationBusy = true
                 try {
-                    val payload = LiveRegistrationQrPayload.parse(rawQr)
                     val displayName = listOf(Build.MANUFACTURER, Build.MODEL)
                         .filter { it.isNotBlank() }
                         .joinToString(" ")
@@ -265,12 +264,28 @@ private fun OpenVtaLoggerAppScreen(
                     app.container.liveUpstreamManager.refreshCommandConnection()
                     app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
                 } catch (exception: Exception) {
-                    app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
+                    app.container.updateStatus { it.copy(lastMessage = "$sourceLabel registration failed: ${exception.message}") }
                 } finally {
                     liveRegistrationBusy = false
                 }
             }
         }
+    }
+
+    val registerLiveFromCode: (String, String) -> Unit = { baseUrl, token ->
+        runCatching { LiveRegistrationQrPayload.fromManual(baseUrl, token) }
+            .onSuccess { registerLivePayload(it, "Live code") }
+            .onFailure { exception ->
+                app.container.updateStatus { it.copy(lastMessage = "Live code registration failed: ${exception.message}") }
+            }
+    }
+
+    val registerLiveFromQr: (String) -> Unit = { rawQr ->
+        runCatching { LiveRegistrationQrPayload.parse(rawQr) }
+            .onSuccess { registerLivePayload(it, "Live QR") }
+            .onFailure { exception ->
+                app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
+            }
     }
 
     val liveQrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -462,6 +477,7 @@ private fun OpenVtaLoggerAppScreen(
                             .setOrientationLocked(false),
                     )
                 },
+                onRegisterLiveCode = registerLiveFromCode,
                 onSave = {
                     app.container.settingsRepository.save(settings)
                     app.container.liveUpstreamManager.refreshCommandConnection()
@@ -640,6 +656,7 @@ private fun SettingsScreen(
     liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
     onScanLiveQr: () -> Unit,
+    onRegisterLiveCode: (String, String) -> Unit,
     onSave: () -> Unit,
 ) {
     LazyColumn(
@@ -653,6 +670,7 @@ private fun SettingsScreen(
                 liveRegistrationBusy = liveRegistrationBusy,
                 onSettingsChange = onSettingsChange,
                 onScanLiveQr = onScanLiveQr,
+                onRegisterLiveCode = onRegisterLiveCode,
                 onSave = onSave,
             )
         }
@@ -735,8 +753,13 @@ private fun SettingsCard(
     liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
     onScanLiveQr: () -> Unit,
+    onRegisterLiveCode: (String, String) -> Unit,
     onSave: () -> Unit,
 ) {
+    var manualLiveBaseUrl by remember(settings.liveBaseUrl) {
+        mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
+    }
+    var manualRegistrationCode by remember { mutableStateOf("") }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
@@ -784,6 +807,7 @@ private fun SettingsCard(
                 },
             )
             HorizontalDivider()
+            Text("OpenVTA Live", style = MaterialTheme.typography.titleMedium)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -796,6 +820,11 @@ private fun SettingsCard(
                 )
                 Text("OpenVTA Live upstream")
             }
+            Text(
+                "Pair this device before any telemetry or VTA upload is sent upstream.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Button(
                 onClick = onScanLiveQr,
                 enabled = !liveRegistrationBusy,
@@ -804,9 +833,32 @@ private fun SettingsCard(
                 Spacer(Modifier.width(6.dp))
                 Text(if (liveRegistrationBusy) "Registering" else "Scan Live QR")
             }
+            OutlinedTextField(
+                value = manualLiveBaseUrl,
+                onValueChange = { manualLiveBaseUrl = it },
+                label = { Text("Live server URL") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = manualRegistrationCode,
+                onValueChange = { manualRegistrationCode = it },
+                label = { Text("One-time registration code") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Button(
+                onClick = { onRegisterLiveCode(manualLiveBaseUrl, manualRegistrationCode) },
+                enabled = !liveRegistrationBusy && manualLiveBaseUrl.isNotBlank() && manualRegistrationCode.isNotBlank(),
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (liveRegistrationBusy) "Registering" else "Register with code")
+            }
+            Text("Connection", style = MaterialTheme.typography.labelLarge)
             Text(
                 if (settings.liveDeviceId.isBlank()) {
-                    "Scan the QR shown in OpenVTA Live to connect this app. No server URL or credential entry is required."
+                    "Not connected. Generate a device registration code in OpenVTA Live user web."
                 } else {
                     "Connected to ${settings.liveBaseUrl} as ${settings.liveDeviceId.take(8)}..."
                 },
@@ -814,6 +866,7 @@ private fun SettingsCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             HorizontalDivider()
+            Text("FTP export", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = settings.ftpHost,
                 onValueChange = { onSettingsChange(settings.copy(ftpHost = it)) },
