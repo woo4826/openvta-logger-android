@@ -36,6 +36,26 @@ class LiveRegistrationClient {
     }
 }
 
+data class LiveRegistrationQrPayload(
+    val baseUrl: String,
+    val token: String,
+) {
+    companion object {
+        fun parse(raw: String): LiveRegistrationQrPayload {
+            val json = JSONObject(raw)
+            val type = json.optString("type")
+            require(type == TYPE) { "not an OpenVTA Live QR" }
+            val baseUrl = json.optString("baseUrl").trim().trimEnd('/')
+            val token = json.optString("token").trim()
+            require(baseUrl.startsWith("https://") || baseUrl.startsWith("http://")) { "QR is missing Live server URL" }
+            require(token.isNotBlank()) { "QR is missing registration token" }
+            return LiveRegistrationQrPayload(baseUrl = baseUrl, token = token)
+        }
+
+        const val TYPE = "openvta-live-registration"
+    }
+}
+
 data class LiveRegistrationResult(
     val tenantId: String,
     val deviceId: String,

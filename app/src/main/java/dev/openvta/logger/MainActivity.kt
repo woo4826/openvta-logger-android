@@ -74,6 +74,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import androidx.core.content.FileProvider
 import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.GpsSample
@@ -85,6 +87,7 @@ import dev.openvta.logger.domain.UploadState
 import dev.openvta.logger.domain.VtaLogParser
 import dev.openvta.logger.domain.VtaTraceEnhancer
 import dev.openvta.logger.live.LiveRegistrationClient
+import dev.openvta.logger.live.LiveRegistrationQrPayload
 import dev.openvta.logger.recording.RecordingForegroundService
 import dev.openvta.logger.ui.VisualizationCard
 import dev.openvta.logger.upload.UploadWorker
@@ -230,9 +233,54 @@ private fun OpenVtaLoggerAppScreen(
     }
     val coroutineScope = rememberCoroutineScope()
     var busySessionId by remember { mutableStateOf<String?>(null) }
-    var liveRegistrationToken by remember { mutableStateOf("") }
     var liveRegistrationBusy by remember { mutableStateOf(false) }
     val liveRegistrationClient = remember { LiveRegistrationClient() }
+
+    val registerLiveFromQr: (String) -> Unit = { rawQr ->
+        if (!liveRegistrationBusy) {
+            coroutineScope.launch {
+                liveRegistrationBusy = true
+                try {
+                    val payload = LiveRegistrationQrPayload.parse(rawQr)
+                    val displayName = listOf(Build.MANUFACTURER, Build.MODEL)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" ")
+                        .ifBlank { "Android device" }
+                    val result = withContext(Dispatchers.IO) {
+                        liveRegistrationClient.consumeToken(payload.baseUrl, payload.token, displayName, BuildConfig.VERSION_NAME)
+                    }
+                    val updated = settings.copy(
+                        liveEnabled = true,
+                        liveBaseUrl = payload.baseUrl,
+                        liveTenantId = result.tenantId,
+                        liveDeviceId = result.deviceId,
+                        liveMqttCredential = result.mqttCredential,
+                        liveWssCredential = result.wssCredential,
+                        liveApiCredential = result.apiCredential,
+                    )
+                    onSettingsChange(updated)
+                    withContext(Dispatchers.IO) {
+                        app.container.settingsRepository.save(updated)
+                    }
+                    app.container.liveUpstreamManager.refreshCommandConnection()
+                    app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
+                } catch (exception: Exception) {
+                    app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
+                } finally {
+                    liveRegistrationBusy = false
+                }
+            }
+        }
+    }
+
+    val liveQrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val contents = result.contents
+        if (contents.isNullOrBlank()) {
+            app.container.updateStatus { it.copy(lastMessage = "Live QR scan cancelled") }
+        } else {
+            registerLiveFromQr(contents)
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -403,46 +451,16 @@ private fun OpenVtaLoggerAppScreen(
                 modifier = contentModifier,
                 settings = settings,
                 message = status.lastMessage,
-                liveRegistrationToken = liveRegistrationToken,
                 liveRegistrationBusy = liveRegistrationBusy,
                 onSettingsChange = onSettingsChange,
-                onLiveRegistrationTokenChange = { liveRegistrationToken = it },
-                onRegisterLive = {
-                    val token = liveRegistrationToken.trim()
-                    if (token.isNotBlank() && !liveRegistrationBusy) {
-                        coroutineScope.launch {
-                            liveRegistrationBusy = true
-                            try {
-                                val baseUrl = settings.liveBaseUrl
-                                val displayName = listOf(Build.MANUFACTURER, Build.MODEL)
-                                    .filter { it.isNotBlank() }
-                                    .joinToString(" ")
-                                    .ifBlank { "Android device" }
-                                val result = withContext(Dispatchers.IO) {
-                                    liveRegistrationClient.consumeToken(baseUrl, token, displayName, BuildConfig.VERSION_NAME)
-                                }
-                                val updated = settings.copy(
-                                    liveEnabled = true,
-                                    liveTenantId = result.tenantId,
-                                    liveDeviceId = result.deviceId,
-                                    liveMqttCredential = result.mqttCredential,
-                                    liveWssCredential = result.wssCredential,
-                                    liveApiCredential = result.apiCredential,
-                                )
-                                onSettingsChange(updated)
-                                withContext(Dispatchers.IO) {
-                                    app.container.settingsRepository.save(updated)
-                                }
-                                app.container.liveUpstreamManager.refreshCommandConnection()
-                                liveRegistrationToken = ""
-                                app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
-                            } catch (exception: Exception) {
-                                app.container.updateStatus { it.copy(lastMessage = "Live registration failed: ${exception.message}") }
-                            } finally {
-                                liveRegistrationBusy = false
-                            }
-                        }
-                    }
+                onScanLiveQr = {
+                    liveQrLauncher.launch(
+                        ScanOptions()
+                            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                            .setPrompt("Scan OpenVTA Live QR")
+                            .setBeepEnabled(false)
+                            .setOrientationLocked(false),
+                    )
                 },
                 onSave = {
                     app.container.settingsRepository.save(settings)
@@ -619,11 +637,9 @@ private fun SettingsScreen(
     modifier: Modifier,
     settings: AppSettings,
     message: String,
-    liveRegistrationToken: String,
     liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
-    onLiveRegistrationTokenChange: (String) -> Unit,
-    onRegisterLive: () -> Unit,
+    onScanLiveQr: () -> Unit,
     onSave: () -> Unit,
 ) {
     LazyColumn(
@@ -634,11 +650,9 @@ private fun SettingsScreen(
             SettingsCard(
                 settings = settings,
                 message = message,
-                liveRegistrationToken = liveRegistrationToken,
                 liveRegistrationBusy = liveRegistrationBusy,
                 onSettingsChange = onSettingsChange,
-                onLiveRegistrationTokenChange = onLiveRegistrationTokenChange,
-                onRegisterLive = onRegisterLive,
+                onScanLiveQr = onScanLiveQr,
                 onSave = onSave,
             )
         }
@@ -718,11 +732,9 @@ private fun formatDashboardMeters(value: Double): String = String.format(Locale.
 private fun SettingsCard(
     settings: AppSettings,
     message: String,
-    liveRegistrationToken: String,
     liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
-    onLiveRegistrationTokenChange: (String) -> Unit,
-    onRegisterLive: () -> Unit,
+    onScanLiveQr: () -> Unit,
     onSave: () -> Unit,
 ) {
     Card {
@@ -784,53 +796,20 @@ private fun SettingsCard(
                 )
                 Text("OpenVTA Live upstream")
             }
-            OutlinedTextField(
-                value = settings.liveBaseUrl,
-                onValueChange = { onSettingsChange(settings.copy(liveBaseUrl = it)) },
-                label = { Text("Live server URL") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = liveRegistrationToken,
-                onValueChange = onLiveRegistrationTokenChange,
-                label = { Text("Live registration token") },
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
             Button(
-                onClick = onRegisterLive,
-                enabled = liveRegistrationToken.isNotBlank() && settings.liveBaseUrl.isNotBlank() && !liveRegistrationBusy,
+                onClick = onScanLiveQr,
+                enabled = !liveRegistrationBusy,
             ) {
                 Icon(Icons.Default.CloudUpload, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text(if (liveRegistrationBusy) "Registering" else "Register")
+                Text(if (liveRegistrationBusy) "Registering" else "Scan Live QR")
             }
-            OutlinedTextField(
-                value = settings.liveTenantId,
-                onValueChange = { onSettingsChange(settings.copy(liveTenantId = it)) },
-                label = { Text("Live tenant ID") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = settings.liveDeviceId,
-                onValueChange = { onSettingsChange(settings.copy(liveDeviceId = it)) },
-                label = { Text("Live device ID") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = settings.liveApiCredential,
-                onValueChange = { onSettingsChange(settings.copy(liveApiCredential = it)) },
-                label = { Text("Live API credential") },
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
             Text(
-                "Live is opt-in. Until a device is registered by QR or manual token, local VTA files and FTP behavior stay unchanged.",
+                if (settings.liveDeviceId.isBlank()) {
+                    "Scan the QR shown in OpenVTA Live to connect this app. No server URL or credential entry is required."
+                } else {
+                    "Connected to ${settings.liveBaseUrl} as ${settings.liveDeviceId.take(8)}..."
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
