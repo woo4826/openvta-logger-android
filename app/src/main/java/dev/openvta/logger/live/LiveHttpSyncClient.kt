@@ -25,6 +25,8 @@ class LiveHttpSyncClient(
         return when (envelope.optString("stream", entry.kind)) {
             "telemetry" -> sendTelemetry(settings, envelope)
             "status" -> sendStatus(settings, envelope)
+            "chunk-meta",
+            "manifest" -> true
             else -> false
         }
     }

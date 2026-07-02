@@ -108,6 +108,30 @@ class LiveHttpSyncClientTest {
         }
     }
 
+    @Test
+    fun acceptsVtaMetadataOutboxEntriesWithoutHttpPost() {
+        val settings = AppSettings(
+            liveEnabled = true,
+            liveTenantId = "tenant_01",
+            liveDeviceId = "device_01",
+            liveBaseUrl = "http://127.0.0.1:9",
+            liveApiCredential = "api_secret",
+        )
+        val chunk = LiveVtaChunkMetadata(
+            chunkId = "chunk-000001",
+            seqStart = 0,
+            seqEnd = 7,
+            sha256 = "sha256:abc",
+            sizeBytes = 8,
+        )
+        val chunkMeta = LiveProtocol.chunkMetadataEnvelope(settings, session, chunk)
+        val manifest = LiveProtocol.manifestEnvelope(settings, session, listOf(chunk), "sha256:def")
+        val client = LiveHttpSyncClient()
+
+        assertTrue(client.send(settings, chunkMeta.toEntry("chunk-meta")))
+        assertTrue(client.send(settings, manifest.toEntry("manifest")))
+    }
+
     private fun LiveEnvelope.toEntry(kind: String): LiveOutboxEntry = LiveOutboxEntry(
         id = "entry_$kind",
         kind = kind,

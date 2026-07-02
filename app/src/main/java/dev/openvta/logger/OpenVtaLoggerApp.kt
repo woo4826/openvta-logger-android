@@ -45,8 +45,12 @@ class AppContainer(app: Application) {
             }
 
             override fun stopRecording(): LiveCommandResult {
-                ContextCompat.startForegroundService(app, RecordingForegroundService.stopIntent(app))
-                return LiveCommandResult.succeeded(mapOf("action" to "recording.stop"))
+                return runCatching {
+                    app.startService(RecordingForegroundService.stopIntent(app))
+                    LiveCommandResult.succeeded(mapOf("action" to "recording.stop"))
+                }.getOrElse {
+                    LiveCommandResult.failed(mapOf("error" to (it.message ?: "recording.stop failed")))
+                }
             }
         },
     ).also { it.refreshCommandConnection() }

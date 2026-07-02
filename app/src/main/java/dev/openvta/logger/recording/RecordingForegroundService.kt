@@ -102,13 +102,17 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
     }
 
     private fun startRecording() {
-        if (session != null) return
+        if (session != null) {
+            startForeground(NOTIFICATION_ID, buildNotification(if (paused) "Paused" else "Recording"))
+            return
+        }
         if (!hasLocationPermission()) {
             app.container.updateStatus { it.copy(lastMessage = "Location permission is required") }
             stopSelf()
             return
         }
 
+        startForeground(NOTIFICATION_ID, buildNotification("Starting recording"))
         val settings = app.container.settingsRepository.load()
         startedAtMillis = System.currentTimeMillis()
         sensorIndex = 0L

@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.compose.foundation.clickable
@@ -53,6 +55,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -76,6 +80,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.qrcode.QRCodeReader
+import com.google.zxing.common.HybridBinarizer
 import androidx.core.content.FileProvider
 import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.GpsSample
@@ -137,7 +145,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             intent.getBooleanExtra(EXTRA_AUTOMATION_STOP, false) -> {
-                ContextCompat.startForegroundService(this, RecordingForegroundService.stopIntent(this))
+                startService(RecordingForegroundService.stopIntent(this))
             }
         }
     }
@@ -281,7 +289,7 @@ private fun OpenVtaLoggerAppScreen(
     }
 
     val registerLiveFromQr: (String) -> Unit = { rawQr ->
-        runCatching { LiveRegistrationQrPayload.parse(rawQr) }
+        runCatching { LiveRegistrationQrPayload.parse(rawQr, fallbackBaseUrl = settings.liveBaseUrl) }
             .onSuccess { registerLivePayload(it, "Live QR") }
             .onFailure { exception ->
                 app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
@@ -294,6 +302,21 @@ private fun OpenVtaLoggerAppScreen(
             app.container.updateStatus { it.copy(lastMessage = "Live QR scan cancelled") }
         } else {
             registerLiveFromQr(contents)
+        }
+    }
+    val liveQrImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri == null) {
+            app.container.updateStatus { it.copy(lastMessage = "Live QR image selection cancelled") }
+        } else {
+            coroutineScope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { decodeQrTextFromImage(context, uri) }
+                }
+                    .onSuccess(registerLiveFromQr)
+                    .onFailure { exception ->
+                        app.container.updateStatus { it.copy(lastMessage = "Live QR image failed: ${exception.message}") }
+                    }
+            }
         }
     }
 
@@ -338,8 +361,8 @@ private fun OpenVtaLoggerAppScreen(
             permissionLauncher.launch(missing.toTypedArray())
         }
     }
-    val stopRecording = {
-        ContextCompat.startForegroundService(context, RecordingForegroundService.stopIntent(context))
+    val stopRecording: () -> Unit = {
+        context.startService(RecordingForegroundService.stopIntent(context))
     }
 
     Scaffold(
@@ -476,6 +499,9 @@ private fun OpenVtaLoggerAppScreen(
                             .setBeepEnabled(false)
                             .setOrientationLocked(false),
                     )
+                },
+                onSelectLiveQrImage = {
+                    liveQrImageLauncher.launch("image/*")
                 },
                 onRegisterLiveCode = registerLiveFromCode,
                 onSave = {
@@ -656,25 +682,50 @@ private fun SettingsScreen(
     liveRegistrationBusy: Boolean,
     onSettingsChange: (AppSettings) -> Unit,
     onScanLiveQr: () -> Unit,
+    onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
     onSave: () -> Unit,
 ) {
+    var selectedSection by remember { mutableStateOf(SettingsSectionTab.General) }
     LazyColumn(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            SettingsCard(
-                settings = settings,
+            SettingsHeaderCard(
+                selectedSection = selectedSection,
                 message = message,
-                liveRegistrationBusy = liveRegistrationBusy,
-                onSettingsChange = onSettingsChange,
-                onScanLiveQr = onScanLiveQr,
-                onRegisterLiveCode = onRegisterLiveCode,
+                onSectionSelected = { selectedSection = it },
                 onSave = onSave,
             )
         }
+        item {
+            when (selectedSection) {
+                SettingsSectionTab.General -> GeneralSettingsCard(
+                    settings = settings,
+                    onSettingsChange = onSettingsChange,
+                )
+                SettingsSectionTab.Live -> LiveSettingsCard(
+                    settings = settings,
+                    liveRegistrationBusy = liveRegistrationBusy,
+                    onSettingsChange = onSettingsChange,
+                    onScanLiveQr = onScanLiveQr,
+                    onSelectLiveQrImage = onSelectLiveQrImage,
+                    onRegisterLiveCode = onRegisterLiveCode,
+                )
+                SettingsSectionTab.Ftp -> FtpSettingsCard(
+                    settings = settings,
+                    onSettingsChange = onSettingsChange,
+                )
+            }
+        }
     }
+}
+
+private enum class SettingsSectionTab(val label: String) {
+    General("General"),
+    Live("Live"),
+    Ftp("FTP"),
 }
 
 @Composable
@@ -747,19 +798,12 @@ private fun DashboardCard(
 private fun formatDashboardMeters(value: Double): String = String.format(Locale.US, "%.1f m", value)
 
 @Composable
-private fun SettingsCard(
-    settings: AppSettings,
+private fun SettingsHeaderCard(
+    selectedSection: SettingsSectionTab,
     message: String,
-    liveRegistrationBusy: Boolean,
-    onSettingsChange: (AppSettings) -> Unit,
-    onScanLiveQr: () -> Unit,
-    onRegisterLiveCode: (String, String) -> Unit,
+    onSectionSelected: (SettingsSectionTab) -> Unit,
     onSave: () -> Unit,
 ) {
-    var manualLiveBaseUrl by remember(settings.liveBaseUrl) {
-        mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
-    }
-    var manualRegistrationCode by remember { mutableStateOf("") }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
@@ -781,6 +825,27 @@ private fun SettingsCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            TabRow(selectedTabIndex = SettingsSectionTab.entries.indexOf(selectedSection)) {
+                SettingsSectionTab.entries.forEach { section ->
+                    Tab(
+                        selected = selectedSection == section,
+                        onClick = { onSectionSelected(section) },
+                        text = { Text(section.label) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GeneralSettingsCard(
+    settings: AppSettings,
+    onSettingsChange: (AppSettings) -> Unit,
+) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("General", style = MaterialTheme.typography.titleMedium)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -806,7 +871,25 @@ private fun SettingsCard(
                     onSettingsChange(settings.copy(imuPresetId = preset.id))
                 },
             )
-            HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun LiveSettingsCard(
+    settings: AppSettings,
+    liveRegistrationBusy: Boolean,
+    onSettingsChange: (AppSettings) -> Unit,
+    onScanLiveQr: () -> Unit,
+    onSelectLiveQrImage: () -> Unit,
+    onRegisterLiveCode: (String, String) -> Unit,
+) {
+    var manualLiveBaseUrl by remember(settings.liveBaseUrl) {
+        mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
+    }
+    var manualRegistrationCode by remember { mutableStateOf("") }
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("OpenVTA Live", style = MaterialTheme.typography.titleMedium)
             Row(
                 modifier = Modifier
@@ -825,13 +908,23 @@ private fun SettingsCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(
-                onClick = onScanLiveQr,
-                enabled = !liveRegistrationBusy,
-            ) {
-                Icon(Icons.Default.CloudUpload, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(if (liveRegistrationBusy) "Registering" else "Scan Live QR")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onScanLiveQr,
+                    enabled = !liveRegistrationBusy,
+                ) {
+                    Icon(Icons.Default.CloudUpload, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (liveRegistrationBusy) "Registering" else "Scan QR")
+                }
+                Button(
+                    onClick = onSelectLiveQrImage,
+                    enabled = !liveRegistrationBusy,
+                ) {
+                    Icon(Icons.Default.Folder, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("QR image")
+                }
             }
             OutlinedTextField(
                 value = manualLiveBaseUrl,
@@ -843,9 +936,10 @@ private fun SettingsCard(
             OutlinedTextField(
                 value = manualRegistrationCode,
                 onValueChange = { manualRegistrationCode = it },
-                label = { Text("One-time registration code") },
+                label = { Text("6 digit pairing code") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             Button(
                 onClick = { onRegisterLiveCode(manualLiveBaseUrl, manualRegistrationCode) },
@@ -865,7 +959,17 @@ private fun SettingsCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun FtpSettingsCard(
+    settings: AppSettings,
+    onSettingsChange: (AppSettings) -> Unit,
+) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("FTP export", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = settings.ftpHost,
@@ -1049,4 +1153,15 @@ private fun shareFile(context: Context, file: File) {
         .putExtra(Intent.EXTRA_STREAM, uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     context.startActivity(Intent.createChooser(intent, "Share ${file.name}"))
+}
+
+private fun decodeQrTextFromImage(context: Context, uri: Uri): String {
+    val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+        BitmapFactory.decodeStream(stream)
+    } ?: throw IllegalArgumentException("Unable to read QR image")
+    val pixels = IntArray(bitmap.width * bitmap.height)
+    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    val source = RGBLuminanceSource(bitmap.width, bitmap.height, pixels)
+    val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+    return QRCodeReader().decode(binaryBitmap).text
 }
