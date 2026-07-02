@@ -170,6 +170,17 @@ class MainActivity : ComponentActivity() {
             imuPresetId = intent.getStringExtra(EXTRA_AUTOMATION_IMU_PRESET_ID)?.let {
                 ImuEnhancementPresets.find(it).id
             } ?: current.imuPresetId,
+            liveEnabled = if (intent.hasExtra(EXTRA_AUTOMATION_LIVE_ENABLED)) {
+                intent.getBooleanExtra(EXTRA_AUTOMATION_LIVE_ENABLED, current.liveEnabled)
+            } else {
+                current.liveEnabled
+            },
+            liveBaseUrl = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_BASE_URL) ?: current.liveBaseUrl,
+            liveTenantId = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_TENANT_ID) ?: current.liveTenantId,
+            liveDeviceId = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_DEVICE_ID) ?: current.liveDeviceId,
+            liveMqttCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_MQTT_CREDENTIAL) ?: current.liveMqttCredential,
+            liveWssCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_WSS_CREDENTIAL) ?: current.liveWssCredential,
+            liveApiCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_API_CREDENTIAL) ?: current.liveApiCredential,
         )
         repository.save(updated)
         (application as OpenVtaLoggerApp).container.updateStatus {
@@ -190,6 +201,13 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AUTOMATION_KEEP_LOCAL_FILES = "debugKeepLocalFiles"
         const val EXTRA_AUTOMATION_DARK_MODE = "debugDarkMode"
         const val EXTRA_AUTOMATION_IMU_PRESET_ID = "debugImuPresetId"
+        const val EXTRA_AUTOMATION_LIVE_ENABLED = "debugLiveEnabled"
+        const val EXTRA_AUTOMATION_LIVE_BASE_URL = "debugLiveBaseUrl"
+        const val EXTRA_AUTOMATION_LIVE_TENANT_ID = "debugLiveTenantId"
+        const val EXTRA_AUTOMATION_LIVE_DEVICE_ID = "debugLiveDeviceId"
+        const val EXTRA_AUTOMATION_LIVE_MQTT_CREDENTIAL = "debugLiveMqttCredential"
+        const val EXTRA_AUTOMATION_LIVE_WSS_CREDENTIAL = "debugLiveWssCredential"
+        const val EXTRA_AUTOMATION_LIVE_API_CREDENTIAL = "debugLiveApiCredential"
     }
 }
 

@@ -146,6 +146,8 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
 
     private fun stopRecording() {
         val activeSession = session
+        session = null
+        stopSensorsAndLocation()
         if (activeSession != null) {
             val closed = app.container.recordingRepository.closeSession(activeSession)
             app.container.liveUpstreamManager.onRecordingStopped(closed)
@@ -160,9 +162,7 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         } else {
             app.container.updateStatus { it.copy(isRecording = false, isPaused = false, lastMessage = "Idle") }
         }
-        session = null
         releaseWakeLock()
-        stopSensorsAndLocation()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

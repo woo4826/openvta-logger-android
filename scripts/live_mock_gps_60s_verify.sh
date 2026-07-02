@@ -19,6 +19,14 @@ ROUTE_SECONDS="${ROUTE_SECONDS:-60}"
 MIN_GPS_ROWS="${MIN_GPS_ROWS:-55}"
 MIN_UNIQUE_GPS_POINTS="${MIN_UNIQUE_GPS_POINTS:-50}"
 RESET_APP_DATA="${RESET_APP_DATA:-0}"
+LIVE_BASE_URL="${LIVE_BASE_URL:-}"
+LIVE_TENANT_ID="${LIVE_TENANT_ID:-}"
+LIVE_DEVICE_ID="${LIVE_DEVICE_ID:-}"
+LIVE_MQTT_CREDENTIAL="${LIVE_MQTT_CREDENTIAL:-}"
+LIVE_WSS_CREDENTIAL="${LIVE_WSS_CREDENTIAL:-}"
+LIVE_API_CREDENTIAL="${LIVE_API_CREDENTIAL:-}"
+LIVE_ENABLED="${LIVE_ENABLED:-}"
+LIVE_OUTBOX_WAIT_SECONDS="${LIVE_OUTBOX_WAIT_SECONDS:-45}"
 
 SEOUL_LAT_MIN="${SEOUL_LAT_MIN:-37.50}"
 SEOUL_LAT_MAX="${SEOUL_LAT_MAX:-37.62}"
@@ -41,7 +49,23 @@ mkdir -p "$ARTIFACT_DIR"
 LOGCAT_FILE="$ARTIFACT_DIR/logcat.txt"
 CRASH_MARKERS_FILE="$ARTIFACT_DIR/crash_anr_markers.txt"
 SUMMARY_FILE="$ARTIFACT_DIR/summary.txt"
+LIVE_OUTBOX_STATUS_FILE="$ARTIFACT_DIR/live_outbox_status.txt"
 SHOULD_STOP_RECORDING=0
+
+if [[ -z "$LIVE_ENABLED" ]]; then
+  if [[ -n "$LIVE_BASE_URL" && -n "$LIVE_TENANT_ID" && -n "$LIVE_DEVICE_ID" && -n "$LIVE_API_CREDENTIAL" ]]; then
+    LIVE_ENABLED=1
+  else
+    LIVE_ENABLED=0
+  fi
+fi
+
+if [[ "$LIVE_ENABLED" == "1" ]]; then
+  if [[ -z "$LIVE_BASE_URL" || -z "$LIVE_TENANT_ID" || -z "$LIVE_DEVICE_ID" || -z "$LIVE_API_CREDENTIAL" ]]; then
+    echo "LIVE_ENABLED=1 requires LIVE_BASE_URL, LIVE_TENANT_ID, LIVE_DEVICE_ID, and LIVE_API_CREDENTIAL." >&2
+    exit 1
+  fi
+fi
 
 resolve_serial() {
   if [[ -n "${ANDROID_SERIAL:-}" ]]; then
@@ -182,6 +206,40 @@ inject_mock_route() {
   done
 }
 
+live_outbox_statuses() {
+  adb_device shell "run-as $PACKAGE sh -c 'if ls files/vta/live-outbox/*.properties >/dev/null 2>&1; then grep -h \"^status=\" files/vta/live-outbox/*.properties | cut -d= -f2 | sort | uniq -c; fi'" | tr -d '\r'
+}
+
+wait_for_live_outbox_acked() {
+  if [[ "$LIVE_ENABLED" != "1" ]]; then
+    : > "$LIVE_OUTBOX_STATUS_FILE"
+    return
+  fi
+
+  local deadline statuses acked pending sent failed
+  deadline=$((SECONDS + LIVE_OUTBOX_WAIT_SECONDS))
+  while (( SECONDS < deadline )); do
+    statuses="$(live_outbox_statuses || true)"
+    printf "%s\n" "$statuses" > "$LIVE_OUTBOX_STATUS_FILE"
+    acked="$(awk '$2 == "Acked" { print $1 + 0 }' "$LIVE_OUTBOX_STATUS_FILE")"
+    pending="$(awk '$2 == "Pending" { print $1 + 0 }' "$LIVE_OUTBOX_STATUS_FILE")"
+    sent="$(awk '$2 == "Sent" { print $1 + 0 }' "$LIVE_OUTBOX_STATUS_FILE")"
+    failed="$(awk '$2 == "Failed" { print $1 + 0 }' "$LIVE_OUTBOX_STATUS_FILE")"
+    acked="${acked:-0}"
+    pending="${pending:-0}"
+    sent="${sent:-0}"
+    failed="${failed:-0}"
+    if [[ "$acked" -gt 0 && "$pending" -eq 0 && "$sent" -eq 0 && "$failed" -eq 0 ]]; then
+      return
+    fi
+    sleep 2
+  done
+
+  echo "Timed out waiting for Live outbox entries to become Acked." >&2
+  cat "$LIVE_OUTBOX_STATUS_FILE" >&2 || true
+  exit 1
+}
+
 assert_vta_content() {
   local vta_file="$1"
   local meta_file="$2"
@@ -267,14 +325,28 @@ adb_device shell wm dismiss-keyguard >/dev/null 2>&1 || true
 PREVIOUS_VTA="$(latest_remote_file Vta || true)"
 adb_device logcat -c || true
 
-adb_device shell am start -n "$ACTIVITY" \
-  --ez debugApplySettings true \
-  --es debugDriverId "$DRIVER_ID" \
-  --es debugImuPresetId "$IMU_PRESET" \
-  --ez debugPassiveMode true \
-  --ez debugKeepLocalFiles true \
-  --ez debugDarkMode false \
-  --ez debugStartRecording true >/dev/null
+start_args=(
+  shell am start -n "$ACTIVITY"
+  --ez debugApplySettings true
+  --es debugDriverId "$DRIVER_ID"
+  --es debugImuPresetId "$IMU_PRESET"
+  --ez debugPassiveMode true
+  --ez debugKeepLocalFiles true
+  --ez debugDarkMode false
+)
+if [[ "$LIVE_ENABLED" == "1" ]]; then
+  start_args+=(
+    --ez debugLiveEnabled true
+    --es debugLiveBaseUrl "$LIVE_BASE_URL"
+    --es debugLiveTenantId "$LIVE_TENANT_ID"
+    --es debugLiveDeviceId "$LIVE_DEVICE_ID"
+    --es debugLiveApiCredential "$LIVE_API_CREDENTIAL"
+  )
+  [[ -n "$LIVE_MQTT_CREDENTIAL" ]] && start_args+=(--es debugLiveMqttCredential "$LIVE_MQTT_CREDENTIAL")
+  [[ -n "$LIVE_WSS_CREDENTIAL" ]] && start_args+=(--es debugLiveWssCredential "$LIVE_WSS_CREDENTIAL")
+fi
+start_args+=(--ez debugStartRecording true)
+adb_device "${start_args[@]}" >/dev/null
 SHOULD_STOP_RECORDING=1
 REMOTE_VTA="$(wait_for_new_vta "$PREVIOUS_VTA")"
 
@@ -284,6 +356,7 @@ adb_device shell am start -n "$ACTIVITY" --ez debugStopRecording true >/dev/null
 SHOULD_STOP_RECORDING=0
 wait_for_vta_footer "$REMOTE_VTA"
 sleep 3
+wait_for_live_outbox_acked
 
 LOCAL_VTA="$ARTIFACT_DIR/$(basename "$REMOTE_VTA")"
 REMOTE_META="${REMOTE_VTA%.Vta}.meta"
@@ -307,6 +380,9 @@ adb_device exec-out screencap -p > "$ARTIFACT_DIR/after_60s.png" || true
   printf "localMeta=%s\n" "$LOCAL_META"
   printf "logcat=%s\n" "$LOGCAT_FILE"
   printf "screenshot=%s\n" "$ARTIFACT_DIR/after_60s.png"
+  printf "liveEnabled=%s\n" "$LIVE_ENABLED"
+  printf "liveDeviceId=%s\n" "$LIVE_DEVICE_ID"
+  printf "liveOutboxStatus=%s\n" "$LIVE_OUTBOX_STATUS_FILE"
 } >> "$SUMMARY_FILE"
 
 printf "Live mock GPS QA passed.\n"
