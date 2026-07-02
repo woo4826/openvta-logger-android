@@ -194,7 +194,9 @@ class MainActivity : ComponentActivity() {
             liveApiCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_API_CREDENTIAL) ?: current.liveApiCredential,
         )
         repository.save(updated)
-        (application as OpenVtaLoggerApp).container.updateStatus {
+        val app = application as OpenVtaLoggerApp
+        app.container.liveUpstreamManager.refreshCommandConnection()
+        app.container.updateStatus {
             it.copy(lastMessage = "Automation settings applied")
         }
     }

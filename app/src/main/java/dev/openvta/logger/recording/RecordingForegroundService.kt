@@ -25,6 +25,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import dev.openvta.logger.MainActivity
@@ -84,13 +85,18 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action ?: ACTION_START) {
-            ACTION_START -> startRecording()
-            ACTION_PAUSE -> setPaused(true)
-            ACTION_RESUME -> setPaused(false)
-            ACTION_STOP -> stopRecording()
+        return runCatching {
+            when (intent?.action ?: ACTION_START) {
+                ACTION_START -> startRecording()
+                ACTION_PAUSE -> setPaused(true)
+                ACTION_RESUME -> setPaused(false)
+                ACTION_STOP -> stopRecording()
+            }
+            START_STICKY
+        }.getOrElse { throwable ->
+            handleCommandFailure(throwable)
+            START_NOT_STICKY
         }
-        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -179,6 +185,22 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         app.container.updateStatus { it.copy(isPaused = value, lastMessage = if (value) "Recording paused" else "Recording resumed") }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(if (value) "Paused" else "Recording"))
+    }
+
+    private fun handleCommandFailure(throwable: Throwable) {
+        Log.e(LOG_TAG, "Recording service command failed", throwable)
+        stopSensorsAndLocation()
+        releaseWakeLock()
+        session = null
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        app.container.updateStatus {
+            it.copy(
+                isRecording = false,
+                isPaused = false,
+                lastMessage = "Recording command failed: ${throwable.message ?: throwable::class.java.simpleName}",
+            )
+        }
+        stopSelf()
     }
 
     private fun startSensorsAndLocation() {
@@ -448,6 +470,7 @@ class RecordingForegroundService : Service(), SensorEventListener, LocationListe
         const val ACTION_RESUME = "dev.openvta.logger.action.RESUME_RECORDING"
         const val RECORDING_CHANNEL_ID = "recording"
         const val UPLOAD_CHANNEL_ID = "uploads"
+        private const val LOG_TAG = "OpenVTARecording"
         private const val NOTIFICATION_ID = 42
         private const val SENSOR_STATUS_UPDATE_INTERVAL_MS = 500L
         private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L

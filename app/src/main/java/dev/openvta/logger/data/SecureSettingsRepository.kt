@@ -28,7 +28,7 @@ class SecureSettingsRepository(context: Context) {
     fun save(settings: AppSettings) {
         preferences.edit()
             .putString(KEY_PAYLOAD, encrypt(SettingsCodec.encode(settings)))
-            .apply()
+            .commit()
     }
 
     @OptIn(ExperimentalEncodingApi::class)

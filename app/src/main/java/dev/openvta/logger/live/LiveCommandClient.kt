@@ -15,6 +15,7 @@ class LiveCommandClient(
         .pingInterval(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build(),
+    private val onConnectionEvent: (LiveCommandConnectionEvent) -> Unit = {},
 ) {
     private var activeKey: String? = null
     private var activeSocket: WebSocket? = null
@@ -33,6 +34,10 @@ class LiveCommandClient(
         activeSocket = client.newWebSocket(
             request,
             object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    onConnectionEvent(LiveCommandConnectionEvent.Connected(url))
+                }
+
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     handleServerMessage(text, { payload -> webSocket.send(payload) }, executor)
                 }
@@ -44,6 +49,7 @@ class LiveCommandClient(
                             activeKey = null
                         }
                     }
+                    onConnectionEvent(LiveCommandConnectionEvent.Failed(url, t))
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -53,6 +59,7 @@ class LiveCommandClient(
                             activeKey = null
                         }
                     }
+                    onConnectionEvent(LiveCommandConnectionEvent.Closed(url, code, reason))
                 }
             },
         )
@@ -102,6 +109,14 @@ class LiveCommandClient(
         if (result != null) body.put("result", JSONObject(result))
         return body.toString()
     }
+}
+
+sealed interface LiveCommandConnectionEvent {
+    val url: String
+
+    data class Connected(override val url: String) : LiveCommandConnectionEvent
+    data class Failed(override val url: String, val throwable: Throwable) : LiveCommandConnectionEvent
+    data class Closed(override val url: String, val code: Int, val reason: String) : LiveCommandConnectionEvent
 }
 
 interface LiveCommandExecutor {
