@@ -1,6 +1,7 @@
 package dev.openvta.logger
 
 import android.Manifest
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -104,10 +105,7 @@ class MainActivityUserFlowInstrumentedTest {
     @Test
     fun backgroundRemoteStartFailsWithoutStartingLocationService() {
         val app = ApplicationProvider.getApplicationContext<OpenVtaLoggerApp>()
-        InstrumentationRegistry.getInstrumentation().uiAutomation
-            .executeShellCommand("input keyevent KEYCODE_HOME")
-            .close()
-        Thread.sleep(1_500)
+        pressHomeAndWaitForBackground(app)
 
         val start = app.container.liveUpstreamManager.execute(
             LiveDeviceCommand(
@@ -124,6 +122,14 @@ class MainActivityUserFlowInstrumentedTest {
         assertEquals(true, start.result["requiresForeground"])
     }
 
+    private fun pressHomeAndWaitForBackground(app: OpenVtaLoggerApp) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val descriptor = instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_HOME")
+        ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+        instrumentation.waitForIdleSync()
+        waitForForegroundState(app, expected = false, timeoutMillis = 10_000)
+    }
+
     private fun waitForRecordingState(
         app: OpenVtaLoggerApp,
         expected: Boolean,
@@ -135,5 +141,18 @@ class MainActivityUserFlowInstrumentedTest {
             Thread.sleep(100)
         }
         error("Timed out waiting for isRecording=$expected")
+    }
+
+    private fun waitForForegroundState(
+        app: OpenVtaLoggerApp,
+        expected: Boolean,
+        timeoutMillis: Long = 10_000,
+    ) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (app.isAppInForeground() == expected) return
+            Thread.sleep(100)
+        }
+        error("Timed out waiting for foreground=$expected")
     }
 }
