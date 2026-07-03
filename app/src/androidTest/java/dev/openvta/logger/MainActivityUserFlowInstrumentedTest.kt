@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import dev.openvta.logger.live.LiveDeviceCommand
 import dev.openvta.logger.recording.RecordingForegroundService
@@ -98,6 +99,29 @@ class MainActivityUserFlowInstrumentedTest {
 
         assertTrue("VTA file should exist", session.vtaFile.isFile)
         assertTrue("VTA session should be closed with footer", session.vtaFile.readText().contains("%% End"))
+    }
+
+    @Test
+    fun backgroundRemoteStartFailsWithoutStartingLocationService() {
+        val app = ApplicationProvider.getApplicationContext<OpenVtaLoggerApp>()
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("input keyevent KEYCODE_HOME")
+            .close()
+        Thread.sleep(1_500)
+
+        val start = app.container.liveUpstreamManager.execute(
+            LiveDeviceCommand(
+                id = "remote-background-start-id",
+                commandId = "remote-background-start-command",
+                type = "recording.start",
+                recordingId = null,
+                payload = null,
+            ),
+        )
+
+        assertEquals("failed", start.status)
+        assertEquals(false, app.container.status.value.isRecording)
+        assertEquals(true, start.result["requiresForeground"])
     }
 
     private fun waitForRecordingState(
