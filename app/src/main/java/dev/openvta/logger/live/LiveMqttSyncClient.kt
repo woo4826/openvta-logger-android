@@ -10,11 +10,11 @@ import java.time.Instant
 class LiveMqttSyncClient(
     private val publisher: LiveMqttPublisher = PahoLiveMqttPublisher(),
 ) : LiveSyncClient {
-    override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
-        if (!LiveProtocol.isConfigured(settings) || settings.liveMqttCredential.isBlank()) return false
-        val serverUri = LiveEndpointConfig.mqttServerUri(settings) ?: return false
-        val topic = LiveEndpointConfig.mqttTopic(settings, entry) ?: return false
-        return publisher.publish(
+    override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+        if (!LiveProtocol.isConfigured(settings) || settings.liveMqttCredential.isBlank()) return LiveSyncResult.failed()
+        val serverUri = LiveEndpointConfig.mqttServerUri(settings) ?: return LiveSyncResult.failed()
+        val topic = LiveEndpointConfig.mqttTopic(settings, entry) ?: return LiveSyncResult.failed()
+        val delivered = publisher.publish(
             serverUri = serverUri,
             clientId = "openvta-android-${settings.liveDeviceId}",
             username = settings.liveDeviceId,
@@ -24,6 +24,7 @@ class LiveMqttSyncClient(
             qos = LiveEndpointConfig.mqttQos(entry),
             will = mqttWill(settings),
         )
+        return if (delivered) LiveSyncResult.delivered() else LiveSyncResult.failed()
     }
 }
 
@@ -31,8 +32,11 @@ class LiveHybridSyncClient(
     private val mqttClient: LiveSyncClient = LiveMqttSyncClient(),
     private val httpFallback: LiveSyncClient = LiveHttpSyncClient(),
 ) : LiveSyncClient {
-    override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean =
-        httpFallback.send(settings, entry) || runCatching { mqttClient.send(settings, entry) }.getOrDefault(false)
+    override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+        val httpResult = httpFallback.send(settings, entry)
+        if (httpResult.delivered) return httpResult
+        return runCatching { mqttClient.send(settings, entry) }.getOrDefault(LiveSyncResult.failed())
+    }
 }
 
 interface LiveMqttPublisher {

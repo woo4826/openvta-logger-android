@@ -10,7 +10,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dev.openvta.logger.OpenVtaLoggerApp
+import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.UploadState
+import dev.openvta.logger.live.LiveProtocol
 
 class UploadWorker(
     appContext: Context,
@@ -31,7 +33,7 @@ class UploadWorker(
                 repository.zipSession(session)
             }
             FtpUploadClient().upload(settings, session.zipFile)
-            if (!settings.keepLocalFiles) {
+            if (shouldDeleteLocalFilesAfterFtp(settings)) {
                 session.vtaFile.delete()
                 session.zipFile.delete()
             }
@@ -78,3 +80,6 @@ private fun Exception.isPermanentUploadFailure(): Boolean {
         message.startsWith("FTP login failed") ||
         message.startsWith("FTP binary mode failed")
 }
+
+internal fun shouldDeleteLocalFilesAfterFtp(settings: AppSettings): Boolean =
+    !settings.keepLocalFiles && !LiveProtocol.isConfigured(settings)

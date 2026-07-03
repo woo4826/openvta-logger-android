@@ -2,6 +2,7 @@ package dev.openvta.logger.live
 
 import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.RecordingSession
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -28,9 +29,9 @@ class LiveUpstreamManagerTest {
             loadSettings = { settings },
             outboxRepository = repository,
             syncClient = object : LiveSyncClient {
-                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
                     deliveredIds += entry.id
-                    return true
+                    return LiveSyncResult.delivered()
                 }
             },
             executor = Executor { it.run() },
@@ -51,6 +52,99 @@ class LiveUpstreamManagerTest {
     }
 
     @Test
+    fun flushPendingKeepsRangedEntriesUntilServerAck() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult =
+                    LiveSyncResult.delivered()
+            },
+            executor = Executor { it.run() },
+        )
+
+        repository.enqueue("telemetry", "recording_01", 1, 1, "sha256:abc", """{"stream":"telemetry"}""")
+
+        assertEquals(0, manager.flushPending())
+        assertEquals(1, manager.pendingCount())
+        assertEquals(LiveOutboxStatus.Sent, repository.listPending().single().status)
+    }
+
+    @Test
+    fun flushPendingAppliesServerAckForMatchingRangeAndHash() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult =
+                    LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
+            },
+            executor = Executor { it.run() },
+        )
+
+        repository.enqueue("telemetry", "recording_01", 1, 1, "sha256:abc", """{"stream":"telemetry"}""")
+
+        assertEquals(1, manager.flushPending())
+        assertEquals(0, manager.pendingCount())
+    }
+
+    @Test
+    fun missingRangeCommandRequeuesOnlyRequestedRangeBeforeFlushing() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings()
+        val sentSeqs = mutableListOf<Long>()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    sentSeqs += entry.seqStart
+                    return LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
+                }
+            },
+            executor = Executor { it.run() },
+        )
+        val first = repository.enqueue("telemetry", "recording_01", 1, 1, "sha256:first", """{"seq":1}""")
+        val second = repository.enqueue("telemetry", "recording_01", 2, 2, "sha256:second", """{"seq":2}""")
+        repository.markAcked(first.id)
+        repository.markAcked(second.id)
+
+        val result = manager.execute(
+            LiveDeviceCommand(
+                id = "id_01",
+                commandId = "cmd_01",
+                type = "device.request-missing-range-upload",
+                recordingId = "recording_01",
+                payload = JSONObject("""{"missingRanges":[[2,2]]}"""),
+            ),
+        )
+
+        assertEquals("succeeded", result.status)
+        assertEquals(1, result.result["requeued"])
+        assertEquals(1, result.result["flushed"])
+        assertEquals(listOf(2L), sentSeqs)
+        assertEquals(0, manager.pendingCount())
+    }
+
+    @Test
     fun recordingStopPublishesStatusChunkMetadataAndManifest() {
         val repository = LiveOutboxRepository(temporaryFolder.root)
         val settings = AppSettings(
@@ -66,9 +160,16 @@ class LiveUpstreamManagerTest {
             loadSettings = { settings },
             outboxRepository = repository,
             syncClient = object : LiveSyncClient {
-                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
                     deliveredKinds += entry.kind
-                    return true
+                    return LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
                 }
             },
             vtaUploadClient = object : LiveVtaUploadClient {
@@ -91,4 +192,12 @@ class LiveUpstreamManagerTest {
         assertEquals(listOf("status", "chunk-meta", "manifest"), deliveredKinds)
         assertEquals(0, manager.pendingCount())
     }
+
+    private fun liveSettings(): AppSettings = AppSettings(
+        liveEnabled = true,
+        liveBaseUrl = "https://openvta-live.kro.kr",
+        liveTenantId = "tenant_01",
+        liveDeviceId = "device_01",
+        liveApiCredential = "api_secret",
+    )
 }

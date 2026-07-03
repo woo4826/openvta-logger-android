@@ -157,6 +157,50 @@ object LiveProtocol {
         val digest = MessageDigest.getInstance("SHA-256").digest(payload)
         return "sha256:" + digest.joinToString("") { "%02x".format(it) }
     }
+
+    fun parseServerAck(raw: String): LiveServerAck? {
+        val body = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        if (body.optString("type") != "server.ack") return null
+        val deviceId = body.optString("deviceId").takeIf { it.isNotBlank() } ?: return null
+        val recordingId = body.optString("recordingId").takeIf { it.isNotBlank() } ?: return null
+        return LiveServerAck(
+            deviceId = deviceId,
+            recordingId = recordingId,
+            ackedRanges = parseRanges(body.optJSONArray("ackedRanges")),
+            missingRanges = parseRanges(body.optJSONArray("missingRanges")),
+            acceptedPayloads = parseAcceptedPayloads(body.optJSONArray("acceptedPayloads")),
+            serverReceivedAt = body.optString("serverReceivedAt").takeIf { it.isNotBlank() },
+        )
+    }
+
+    fun parseMissingRanges(payload: JSONObject?): List<LiveSequenceRange> =
+        parseRanges(payload?.optJSONArray("missingRanges"))
+
+    private fun parseRanges(array: JSONArray?): List<LiveSequenceRange> {
+        if (array == null) return emptyList()
+        val ranges = mutableListOf<LiveSequenceRange>()
+        for (index in 0 until array.length()) {
+            val item = array.optJSONArray(index) ?: continue
+            if (item.length() < 2) continue
+            val start = item.optLong(0, -1)
+            val end = item.optLong(1, -1)
+            if (start >= 0 && end >= start) ranges += LiveSequenceRange(start, end)
+        }
+        return ranges
+    }
+
+    private fun parseAcceptedPayloads(array: JSONArray?): List<LiveAcknowledgedPayload> {
+        if (array == null) return emptyList()
+        val payloads = mutableListOf<LiveAcknowledgedPayload>()
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val start = item.optLong("seqStart", -1)
+            val end = item.optLong("seqEnd", -1)
+            val hash = item.optString("payloadHash").takeIf { it.isNotBlank() } ?: continue
+            if (start >= 0 && end >= start) payloads += LiveAcknowledgedPayload(LiveSequenceRange(start, end), hash)
+        }
+        return payloads
+    }
 }
 
 data class LiveEnvelope(
@@ -173,4 +217,32 @@ data class LiveVtaChunkMetadata(
     val seqEnd: Long,
     val sha256: String,
     val sizeBytes: Long,
+)
+
+data class LiveSequenceRange(
+    val start: Long,
+    val end: Long,
+) {
+    init {
+        require(start >= 0) { "sequence range start must be non-negative" }
+        require(end >= start) { "sequence range end must be greater than or equal to start" }
+    }
+
+    fun contains(other: LiveSequenceRange): Boolean = start <= other.start && end >= other.end
+
+    fun overlaps(other: LiveSequenceRange): Boolean = start <= other.end && other.start <= end
+}
+
+data class LiveAcknowledgedPayload(
+    val range: LiveSequenceRange,
+    val payloadHash: String,
+)
+
+data class LiveServerAck(
+    val deviceId: String,
+    val recordingId: String,
+    val ackedRanges: List<LiveSequenceRange>,
+    val missingRanges: List<LiveSequenceRange> = emptyList(),
+    val acceptedPayloads: List<LiveAcknowledgedPayload> = emptyList(),
+    val serverReceivedAt: String? = null,
 )

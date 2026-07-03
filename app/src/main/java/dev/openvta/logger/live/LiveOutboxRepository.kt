@@ -18,6 +18,8 @@ interface LiveOutboxStore {
     fun markSent(id: String)
     fun markAcked(id: String)
     fun markFailed(id: String)
+    fun applyServerAck(ack: LiveServerAck): Int
+    fun requeueMissingRanges(recordingId: String, ranges: List<LiveSequenceRange>): Int
 }
 
 class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
@@ -50,7 +52,7 @@ class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
         outboxDir.listFiles { file -> file.extension == "properties" }
             ?.mapNotNull(::read)
             ?.filter { it.status == LiveOutboxStatus.Pending || it.status == LiveOutboxStatus.Sent || it.status == LiveOutboxStatus.Failed }
-            ?.sortedBy { it.createdAtMillis }
+            ?.sortedWith(liveOutboxEntryComparator)
             ?: emptyList()
 
     override fun markSent(id: String) {
@@ -66,6 +68,27 @@ class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
     override fun markFailed(id: String) {
         val entry = read(File(outboxDir, "$id.properties")) ?: return
         write(entry.copy(status = LiveOutboxStatus.Failed, updatedAtMillis = System.currentTimeMillis()))
+    }
+
+    override fun applyServerAck(ack: LiveServerAck): Int {
+        var acked = 0
+        for (entry in listAllEntries()) {
+            if (entry.status == LiveOutboxStatus.Acked || !entry.isAcknowledgedBy(ack)) continue
+            write(entry.copy(status = LiveOutboxStatus.Acked, updatedAtMillis = System.currentTimeMillis()))
+            acked += 1
+        }
+        return acked
+    }
+
+    override fun requeueMissingRanges(recordingId: String, ranges: List<LiveSequenceRange>): Int {
+        if (ranges.isEmpty()) return 0
+        var requeued = 0
+        for (entry in listAllEntries()) {
+            if (entry.recordingId != recordingId || !entry.overlapsAny(ranges) || entry.status == LiveOutboxStatus.Pending) continue
+            write(entry.copy(status = LiveOutboxStatus.Pending, updatedAtMillis = System.currentTimeMillis()))
+            requeued += 1
+        }
+        return requeued
     }
 
     private fun write(entry: LiveOutboxEntry) {
@@ -102,6 +125,12 @@ class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
             updatedAtMillis = properties.getProperty("updatedAtMillis", "0").toLongOrNull() ?: 0L,
         )
     }
+
+    private fun listAllEntries(): List<LiveOutboxEntry> =
+        outboxDir.listFiles { file -> file.extension == "properties" }
+            ?.mapNotNull(::read)
+            ?.sortedWith(liveOutboxEntryComparator)
+            ?: emptyList()
 }
 
 data class LiveOutboxEntry(
@@ -122,4 +151,40 @@ enum class LiveOutboxStatus {
     Sent,
     Acked,
     Failed,
+}
+
+internal val liveOutboxEntryComparator: Comparator<LiveOutboxEntry> =
+    compareBy<LiveOutboxEntry> { it.createdAtMillis }
+        .thenBy { liveOutboxKindOrder(it.kind) }
+        .thenBy { it.seqStart }
+        .thenBy { it.seqEnd }
+        .thenBy { it.id }
+
+private fun liveOutboxKindOrder(kind: String): Int =
+    when (kind) {
+        "status" -> 0
+        "telemetry" -> 1
+        "chunk-meta" -> 2
+        "manifest" -> 3
+        else -> 4
+    }
+
+internal fun LiveOutboxEntry.range(): LiveSequenceRange = LiveSequenceRange(seqStart, seqEnd)
+
+internal fun LiveOutboxEntry.requiresServerAck(): Boolean = seqStart != 0L || seqEnd != 0L
+
+internal fun LiveOutboxEntry.isAcknowledgedBy(ack: LiveServerAck): Boolean {
+    if (recordingId != ack.recordingId) return false
+    val entryRange = range()
+    if (ack.missingRanges.any { it.overlaps(entryRange) }) return false
+    if (ack.ackedRanges.none { it.contains(entryRange) }) return false
+    if (ack.acceptedPayloads.isEmpty()) return true
+    return ack.acceptedPayloads.any { accepted ->
+        accepted.range.contains(entryRange) && accepted.payloadHash == payloadHash
+    }
+}
+
+internal fun LiveOutboxEntry.overlapsAny(ranges: List<LiveSequenceRange>): Boolean {
+    val entryRange = range()
+    return ranges.any { it.overlaps(entryRange) }
 }

@@ -62,8 +62,14 @@ class LiveHttpSyncClientTest {
             val status = LiveProtocol.statusEnvelope(settings, session, "completed", 1_577_836_802_000L)
             val client = LiveHttpSyncClient()
 
-            assertTrue(client.send(settings, telemetry.toEntry("telemetry")))
-            assertTrue(client.send(settings, status.toEntry("status")))
+            val telemetryResult = client.send(settings, telemetry.toEntry("telemetry"))
+            val statusResult = client.send(settings, status.toEntry("status"))
+            assertTrue(telemetryResult.delivered)
+            assertEquals(
+                listOf(LiveAcknowledgedPayload(LiveSequenceRange(1, 1), telemetry.payloadHash)),
+                telemetryResult.serverAck?.acceptedPayloads,
+            )
+            assertTrue(statusResult.delivered)
 
             val requests = server.requests
             assertEquals(2, requests.size)
@@ -128,8 +134,8 @@ class LiveHttpSyncClientTest {
         val manifest = LiveProtocol.manifestEnvelope(settings, session, listOf(chunk), "sha256:def")
         val client = LiveHttpSyncClient()
 
-        assertTrue(client.send(settings, chunkMeta.toEntry("chunk-meta")))
-        assertTrue(client.send(settings, manifest.toEntry("manifest")))
+        assertTrue(client.send(settings, chunkMeta.toEntry("chunk-meta")).delivered)
+        assertTrue(client.send(settings, manifest.toEntry("manifest")).delivered)
     }
 
     private fun LiveEnvelope.toEntry(kind: String): LiveOutboxEntry = LiveOutboxEntry(

@@ -57,16 +57,24 @@ class LiveUpstreamManager(
         var acked = 0
         for (entry in outboxRepository.listPending()) {
             outboxRepository.markSent(entry.id)
-            val delivered = runCatching { syncClient.send(settings, entry) }.getOrDefault(false)
-            if (!delivered) {
+            val result = runCatching { syncClient.send(settings, entry) }.getOrDefault(LiveSyncResult.failed())
+            if (!result.delivered) {
                 outboxRepository.markFailed(entry.id)
                 break
             }
-            outboxRepository.markAcked(entry.id)
-            acked += 1
+            val serverAcked = result.serverAck?.let(outboxRepository::applyServerAck) ?: 0
+            if (serverAcked > 0) {
+                acked += serverAcked
+            } else if (!entry.requiresServerAck()) {
+                outboxRepository.markAcked(entry.id)
+                acked += 1
+            }
         }
         return acked
     }
+
+    fun handleServerAck(raw: String): Int =
+        LiveProtocol.parseServerAck(raw)?.let(outboxRepository::applyServerAck) ?: 0
 
     fun refreshCommandConnection() {
         val settings = loadSettings()
@@ -79,11 +87,28 @@ class LiveUpstreamManager(
         when (command.type) {
             "recording.start" -> commandActionHandler.startRecording()
             "recording.stop" -> commandActionHandler.stopRecording()
-            "device.request-sync",
-            "device.request-missing-range-upload" -> LiveCommandResult.succeeded(mapOf("flushed" to flushPending(), "recordingId" to command.recordingId))
+            "device.request-sync" -> LiveCommandResult.succeeded(mapOf("flushed" to flushPending(), "recordingId" to command.recordingId))
+            "device.request-missing-range-upload" -> handleMissingRangeUploadCommand(command)
             "device.ping" -> LiveCommandResult.succeeded(mapOf("at" to System.currentTimeMillis()))
             else -> LiveCommandResult.failed(mapOf("error" to "unsupported command type", "type" to command.type))
         }
+
+    private fun handleMissingRangeUploadCommand(command: LiveDeviceCommand): LiveCommandResult {
+        val recordingId = command.recordingId
+        val ranges = LiveProtocol.parseMissingRanges(command.payload)
+        val requeued = if (recordingId != null && ranges.isNotEmpty()) {
+            outboxRepository.requeueMissingRanges(recordingId, ranges)
+        } else {
+            0
+        }
+        return LiveCommandResult.succeeded(
+            mapOf(
+                "requeued" to requeued,
+                "flushed" to flushPending(),
+                "recordingId" to recordingId,
+            ),
+        )
+    }
 
     private fun refreshCommandConnection(settings: AppSettings) {
         runCatching { commandClient.ensureConnected(settings, this) }

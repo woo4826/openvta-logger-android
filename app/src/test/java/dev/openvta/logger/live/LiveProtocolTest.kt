@@ -87,4 +87,30 @@ class LiveProtocolTest {
         assertTrue(manifest.payloadJson.contains("\"stream\":\"manifest\""))
         assertTrue(manifest.payloadJson.contains("\"finalVtaSha256\""))
     }
+
+    @Test
+    fun parsesServerAckRangesAndAcceptedPayloadHashes() {
+        val ack = LiveProtocol.parseServerAck(
+            """
+            {
+              "v": 1,
+              "type": "server.ack",
+              "deviceId": "device_01",
+              "recordingId": "recording_01",
+              "ackedRanges": [[1, 2]],
+              "missingRanges": [[3, 4]],
+              "acceptedPayloads": [
+                {"seqStart": 1, "seqEnd": 1, "payloadHash": "sha256:abc"}
+              ],
+              "serverReceivedAt": "2026-07-03T00:00:00.000Z"
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("device_01", ack?.deviceId)
+        assertEquals("recording_01", ack?.recordingId)
+        assertEquals(listOf(LiveSequenceRange(1, 2)), ack?.ackedRanges)
+        assertEquals(listOf(LiveSequenceRange(3, 4)), ack?.missingRanges)
+        assertEquals(listOf(LiveAcknowledgedPayload(LiveSequenceRange(1, 1), "sha256:abc")), ack?.acceptedPayloads)
+    }
 }

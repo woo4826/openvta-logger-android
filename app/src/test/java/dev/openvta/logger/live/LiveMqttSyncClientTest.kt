@@ -30,7 +30,7 @@ class LiveMqttSyncClientTest {
             createdAtMillis = 1L,
         )
 
-        assertTrue(LiveMqttSyncClient(publisher).send(settings, entry))
+        assertTrue(LiveMqttSyncClient(publisher).send(settings, entry).delivered)
 
         assertEquals("ssl://openvta-live.kro.kr:8883", publisher.serverUri)
         assertEquals("device_01", publisher.username)
@@ -55,7 +55,7 @@ class LiveMqttSyncClientTest {
             createdAtMillis = 1L,
         )
 
-        assertTrue(LiveMqttSyncClient(publisher).send(settings, entry))
+        assertTrue(LiveMqttSyncClient(publisher).send(settings, entry).delivered)
 
         assertEquals("vta/tenant_01/device_01/recording/recording_01/chunk-meta", publisher.topic)
     }
@@ -76,20 +76,20 @@ class LiveMqttSyncClientTest {
         )
         val client = LiveHybridSyncClient(
             mqttClient = object : LiveSyncClient {
-                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
                     calls += "mqtt"
                     error("mqtt unavailable")
                 }
             },
             httpFallback = object : LiveSyncClient {
-                override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
                     calls += "http"
-                    return true
+                    return LiveSyncResult.delivered()
                 }
             },
         )
 
-        assertTrue(client.send(settings, entry))
+        assertTrue(client.send(settings, entry).delivered)
         assertEquals(listOf("http"), calls)
     }
 

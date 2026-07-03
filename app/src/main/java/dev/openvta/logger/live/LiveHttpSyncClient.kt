@@ -9,7 +9,7 @@ import java.net.URL
 import java.util.Base64
 
 interface LiveSyncClient {
-    fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean
+    fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult
 }
 
 interface LiveVtaUploadClient {
@@ -19,15 +19,15 @@ interface LiveVtaUploadClient {
 class LiveHttpSyncClient(
     private val chunkSizeBytes: Int = DEFAULT_CHUNK_SIZE_BYTES,
 ) : LiveSyncClient, LiveVtaUploadClient {
-    override fun send(settings: AppSettings, entry: LiveOutboxEntry): Boolean {
-        if (!LiveProtocol.isConfigured(settings)) return false
+    override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+        if (!LiveProtocol.isConfigured(settings)) return LiveSyncResult.failed()
         val envelope = JSONObject(entry.payloadJson)
         return when (envelope.optString("stream", entry.kind)) {
-            "telemetry" -> sendTelemetry(settings, envelope)
+            "telemetry" -> sendTelemetry(settings, entry, envelope)
             "status" -> sendStatus(settings, envelope)
             "chunk-meta",
-            "manifest" -> true
-            else -> false
+            "manifest" -> LiveSyncResult.delivered(ackForEntry(settings, entry))
+            else -> LiveSyncResult.failed()
         }
     }
 
@@ -56,26 +56,34 @@ class LiveHttpSyncClient(
         return true
     }
 
-    private fun sendTelemetry(settings: AppSettings, envelope: JSONObject): Boolean {
+    private fun sendTelemetry(settings: AppSettings, entry: LiveOutboxEntry, envelope: JSONObject): LiveSyncResult {
         val recordingId = envelope.getString("recordingId")
         val points = envelope.getJSONObject("payload").getJSONArray("points")
         for (index in 0 until points.length()) {
             val body = JSONObject()
                 .put("recordingId", recordingId)
                 .put("point", points.getJSONObject(index))
-            if (!postJson(settings, "telemetry", body)) return false
+            if (!postJson(settings, "telemetry", body)) return LiveSyncResult.failed()
         }
-        return true
+        return LiveSyncResult.delivered(ackForEntry(settings, entry))
     }
 
-    private fun sendStatus(settings: AppSettings, envelope: JSONObject): Boolean {
+    private fun sendStatus(settings: AppSettings, envelope: JSONObject): LiveSyncResult {
         val payload = envelope.getJSONObject("payload")
         val body = JSONObject()
             .put("status", payload.getString("status"))
             .put("recordingId", payload.optString("recordingId", envelope.optString("recordingId")))
         if (payload.has("at")) body.put("at", payload.getString("at"))
-        return postJson(settings, "status", body)
+        return if (postJson(settings, "status", body)) LiveSyncResult.delivered() else LiveSyncResult.failed()
     }
+
+    private fun ackForEntry(settings: AppSettings, entry: LiveOutboxEntry): LiveServerAck =
+        LiveServerAck(
+            deviceId = settings.liveDeviceId,
+            recordingId = entry.recordingId,
+            ackedRanges = listOf(entry.range()),
+            acceptedPayloads = listOf(LiveAcknowledgedPayload(entry.range(), entry.payloadHash)),
+        )
 
     private fun postJson(settings: AppSettings, path: String, body: JSONObject): Boolean {
         val url = URL(settings.liveBaseUrl.trimEnd('/') + "/api/devices/${settings.liveDeviceId}/$path")
@@ -100,5 +108,15 @@ class LiveHttpSyncClient(
 
     companion object {
         private const val DEFAULT_CHUNK_SIZE_BYTES = 256 * 1024
+    }
+}
+
+data class LiveSyncResult(
+    val delivered: Boolean,
+    val serverAck: LiveServerAck? = null,
+) {
+    companion object {
+        fun delivered(serverAck: LiveServerAck? = null): LiveSyncResult = LiveSyncResult(true, serverAck)
+        fun failed(): LiveSyncResult = LiveSyncResult(false)
     }
 }

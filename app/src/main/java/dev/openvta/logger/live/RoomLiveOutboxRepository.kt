@@ -53,7 +53,7 @@ class RoomLiveOutboxRepository(context: Context) : LiveOutboxStore {
                 LiveOutboxStatus.Sent.name,
                 LiveOutboxStatus.Failed.name,
             ),
-        ).map { it.toEntry() }
+        ).map { it.toEntry() }.sortedWith(liveOutboxEntryComparator)
 
     override fun markSent(id: String) {
         updateStatus(id, LiveOutboxStatus.Sent)
@@ -65,6 +65,27 @@ class RoomLiveOutboxRepository(context: Context) : LiveOutboxStore {
 
     override fun markFailed(id: String) {
         updateStatus(id, LiveOutboxStatus.Failed)
+    }
+
+    override fun applyServerAck(ack: LiveServerAck): Int {
+        var acked = 0
+        for (entry in dao.listAll().map { it.toEntry() }.sortedWith(liveOutboxEntryComparator)) {
+            if (entry.status == LiveOutboxStatus.Acked || !entry.isAcknowledgedBy(ack)) continue
+            updateStatus(entry.id, LiveOutboxStatus.Acked)
+            acked += 1
+        }
+        return acked
+    }
+
+    override fun requeueMissingRanges(recordingId: String, ranges: List<LiveSequenceRange>): Int {
+        if (ranges.isEmpty()) return 0
+        var requeued = 0
+        for (entry in dao.listAll().map { it.toEntry() }.sortedWith(liveOutboxEntryComparator)) {
+            if (entry.recordingId != recordingId || !entry.overlapsAny(ranges) || entry.status == LiveOutboxStatus.Pending) continue
+            updateStatus(entry.id, LiveOutboxStatus.Pending)
+            requeued += 1
+        }
+        return requeued
     }
 
     private fun updateStatus(id: String, status: LiveOutboxStatus) {
@@ -93,6 +114,9 @@ interface LiveOutboxDao {
 
     @Query("SELECT * FROM live_outbox WHERE status IN (:statuses) ORDER BY createdAtMillis ASC")
     fun listPending(statuses: List<String>): List<LiveOutboxEntity>
+
+    @Query("SELECT * FROM live_outbox ORDER BY createdAtMillis ASC")
+    fun listAll(): List<LiveOutboxEntity>
 
     @Query("UPDATE live_outbox SET status = :status, updatedAtMillis = :updatedAtMillis WHERE id = :id")
     fun updateStatus(id: String, status: String, updatedAtMillis: Long)
