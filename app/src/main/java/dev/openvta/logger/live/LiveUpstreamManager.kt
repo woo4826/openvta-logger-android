@@ -50,12 +50,15 @@ class LiveUpstreamManager(
         flushAsync(uploadSession = session)
     }
 
-    fun flushPending(): Int {
+    fun flushPending(): Int = flushPending(deferVtaMetadata = false)
+
+    private fun flushPending(deferVtaMetadata: Boolean): Int {
         val settings = loadSettings()
         if (!LiveProtocol.isConfigured(settings)) return 0
         refreshCommandConnection(settings)
         var acked = 0
         for (entry in outboxRepository.listPending()) {
+            if (deferVtaMetadata && entry.isVtaMetadata()) continue
             outboxRepository.markSent(entry.id)
             val result = runCatching { syncClient.send(settings, entry) }.getOrDefault(LiveSyncResult.failed())
             if (!result.delivered) {
@@ -147,14 +150,17 @@ class LiveUpstreamManager(
 
     private fun flushAsync(uploadSession: RecordingSession? = null) {
         executor.execute {
-            runCatching { flushPending() }
-            if (uploadSession != null) {
-                runCatching {
-                    val settings = loadSettings()
-                    if (LiveProtocol.isConfigured(settings)) {
-                        vtaUploadClient.uploadVta(settings, uploadSession)
-                    }
-                }
+            if (uploadSession == null) {
+                runCatching { flushPending() }
+                return@execute
+            }
+            runCatching { flushPending(deferVtaMetadata = true) }
+            val uploaded = runCatching {
+                val settings = loadSettings()
+                LiveProtocol.isConfigured(settings) && vtaUploadClient.uploadVta(settings, uploadSession)
+            }.getOrDefault(false)
+            if (uploaded) {
+                runCatching { flushPending() }
             }
         }
     }
@@ -167,3 +173,5 @@ class LiveUpstreamManager(
         }
     }
 }
+
+private fun LiveOutboxEntry.isVtaMetadata(): Boolean = kind == "chunk-meta" || kind == "manifest"

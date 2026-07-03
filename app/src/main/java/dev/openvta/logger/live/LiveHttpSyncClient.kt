@@ -48,7 +48,7 @@ class LiveHttpSyncClient(
                     .put("sha256", LiveProtocol.sha256(chunk))
                     .put("sizeBytes", read)
                     .put("contentBase64", Base64.getEncoder().encodeToString(chunk))
-                if (!postJson(settings, "recordings/${session.id}/chunks/$chunkId", body)) return false
+                if (!postJson(settings, "recordings/${session.id}/chunks/$chunkId", body).success) return false
                 offset += read
                 chunkIndex += 1
             }
@@ -59,13 +59,19 @@ class LiveHttpSyncClient(
     private fun sendTelemetry(settings: AppSettings, entry: LiveOutboxEntry, envelope: JSONObject): LiveSyncResult {
         val recordingId = envelope.getString("recordingId")
         val points = envelope.getJSONObject("payload").getJSONArray("points")
+        var serverAck: LiveServerAck? = null
         for (index in 0 until points.length()) {
             val body = JSONObject()
                 .put("recordingId", recordingId)
+                .put("seqStart", entry.seqStart)
+                .put("seqEnd", entry.seqEnd)
+                .put("payloadHash", entry.payloadHash)
                 .put("point", points.getJSONObject(index))
-            if (!postJson(settings, "telemetry", body)) return LiveSyncResult.failed()
+            val result = postJson(settings, "telemetry", body)
+            if (!result.success) return LiveSyncResult.failed()
+            serverAck = result.serverAck ?: serverAck
         }
-        return LiveSyncResult.delivered(ackForEntry(settings, entry))
+        return LiveSyncResult.delivered(serverAck)
     }
 
     private fun sendStatus(settings: AppSettings, envelope: JSONObject): LiveSyncResult {
@@ -74,7 +80,7 @@ class LiveHttpSyncClient(
             .put("status", payload.getString("status"))
             .put("recordingId", payload.optString("recordingId", envelope.optString("recordingId")))
         if (payload.has("at")) body.put("at", payload.getString("at"))
-        return if (postJson(settings, "status", body)) LiveSyncResult.delivered() else LiveSyncResult.failed()
+        return if (postJson(settings, "status", body).success) LiveSyncResult.delivered() else LiveSyncResult.failed()
     }
 
     private fun ackForEntry(settings: AppSettings, entry: LiveOutboxEntry): LiveServerAck =
@@ -85,7 +91,7 @@ class LiveHttpSyncClient(
             acceptedPayloads = listOf(LiveAcknowledgedPayload(entry.range(), entry.payloadHash)),
         )
 
-    private fun postJson(settings: AppSettings, path: String, body: JSONObject): Boolean {
+    private fun postJson(settings: AppSettings, path: String, body: JSONObject): HttpJsonResult {
         val url = URL(settings.liveBaseUrl.trimEnd('/') + "/api/devices/${settings.liveDeviceId}/$path")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -99,17 +105,31 @@ class LiveHttpSyncClient(
             OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            stream?.bufferedReader()?.use { it.readText() }
-            code in 200..299
+            val responseBody = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            HttpJsonResult(
+                success = code in 200..299,
+                serverAck = parseServerAckResponse(responseBody),
+            )
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun parseServerAckResponse(responseBody: String): LiveServerAck? {
+        val body = runCatching { JSONObject(responseBody) }.getOrNull() ?: return null
+        val ack = body.optJSONObject("serverAck") ?: body.takeIf { it.optString("type") == "server.ack" } ?: return null
+        return LiveProtocol.parseServerAck(ack.toString())
     }
 
     companion object {
         private const val DEFAULT_CHUNK_SIZE_BYTES = 256 * 1024
     }
 }
+
+private data class HttpJsonResult(
+    val success: Boolean,
+    val serverAck: LiveServerAck? = null,
+)
 
 data class LiveSyncResult(
     val delivered: Boolean,

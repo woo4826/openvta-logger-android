@@ -230,6 +230,49 @@ class LiveUpstreamManagerTest {
         assertEquals(0, manager.pendingCount())
     }
 
+    @Test
+    fun recordingStopKeepsVtaMetadataPendingWhenVtaUploadFails() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings().copy(liveMqttCredential = "mqtt_secret")
+        val deliveredKinds = mutableListOf<String>()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    deliveredKinds += entry.kind
+                    return LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
+                }
+            },
+            vtaUploadClient = object : LiveVtaUploadClient {
+                override fun uploadVta(settings: AppSettings, session: RecordingSession): Boolean = false
+            },
+            executor = Executor { it.run() },
+        )
+        val vtaFile = temporaryFolder.newFile("recording_02.Vta").apply { writeText("VTA\nGPS\n") }
+        val session = RecordingSession(
+            id = "recording_02",
+            driverId = "CC00",
+            startedAtMillis = 1L,
+            vtaFile = vtaFile,
+            zipFile = File(temporaryFolder.root, "recording_02.Zip"),
+        )
+
+        manager.onRecordingStopped(session)
+
+        assertEquals(listOf("status"), deliveredKinds)
+        val pending = repository.listPending()
+        assertEquals(listOf("chunk-meta", "manifest"), pending.map { it.kind })
+        assertEquals(listOf(LiveOutboxStatus.Pending, LiveOutboxStatus.Pending), pending.map { it.status })
+    }
+
     private fun liveSettings(): AppSettings = AppSettings(
         liveEnabled = true,
         liveBaseUrl = "https://openvta-live.kro.kr",

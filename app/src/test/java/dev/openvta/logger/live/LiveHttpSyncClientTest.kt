@@ -31,7 +31,12 @@ class LiveHttpSyncClientTest {
 
     @Test
     fun sendsTelemetryAndStatusWithDeviceBearerCredential() {
-        val server = MiniHttpServer(expectedRequests = 2).also { it.start() }
+        val server = MiniHttpServer(
+            responseBodies = listOf(
+                """{"serverAck":{"v":1,"type":"server.ack","deviceId":"device_01","recordingId":"recording_01","ackedRanges":[[1,1]],"missingRanges":[],"acceptedPayloads":[{"seqStart":1,"seqEnd":1,"payloadHash":"sha256:server"}],"serverReceivedAt":"2026-07-01T01:00:02.000Z"}}""",
+                "{}",
+            ),
+        ).also { it.start() }
 
         try {
             val settings = AppSettings(
@@ -66,7 +71,7 @@ class LiveHttpSyncClientTest {
             val statusResult = client.send(settings, status.toEntry("status"))
             assertTrue(telemetryResult.delivered)
             assertEquals(
-                listOf(LiveAcknowledgedPayload(LiveSequenceRange(1, 1), telemetry.payloadHash)),
+                listOf(LiveAcknowledgedPayload(LiveSequenceRange(1, 1), "sha256:server")),
                 telemetryResult.serverAck?.acceptedPayloads,
             )
             assertTrue(statusResult.delivered)
@@ -150,7 +155,12 @@ class LiveHttpSyncClientTest {
         createdAtMillis = 1L,
     )
 
-    private class MiniHttpServer(private val expectedRequests: Int) : Closeable {
+    private class MiniHttpServer(
+        private val expectedRequests: Int,
+        private val responseBodies: List<String> = List(expectedRequests) { "{}" },
+    ) : Closeable {
+        constructor(responseBodies: List<String>) : this(responseBodies.size, responseBodies)
+
         private val socket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         private val executor = Executors.newSingleThreadExecutor()
         val requests = Collections.synchronizedList(mutableListOf<CapturedRequest>())
@@ -158,13 +168,13 @@ class LiveHttpSyncClientTest {
 
         fun start() {
             executor.execute {
-                repeat(expectedRequests) {
-                    runCatching { handleOne() }
+                repeat(expectedRequests) { index ->
+                    runCatching { handleOne(responseBodies.getOrElse(index) { "{}" }) }
                 }
             }
         }
 
-        private fun handleOne() {
+        private fun handleOne(responseBody: String) {
             socket.accept().use { client ->
                 val reader = client.getInputStream().bufferedReader(Charsets.UTF_8)
                 val requestLine = reader.readLine()
@@ -193,7 +203,7 @@ class LiveHttpSyncClientTest {
                         body = String(body, 0, read),
                     ),
                 )
-                val response = "{}".toByteArray(Charsets.UTF_8)
+                val response = responseBody.toByteArray(Charsets.UTF_8)
                 client.getOutputStream().write(
                     "HTTP/1.1 200 OK\r\nContent-Length: ${response.size}\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8),
                 )
