@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-unit-test:
     runs-on: ubuntu-latest
@@ -16,6 +19,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
+      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v4
       - name: Validate QA scripts
         run: |
@@ -23,11 +28,21 @@ jobs:
           bash -n scripts/compare_vta_speed_mock.sh
           bash -n scripts/local_ftp_upload_verify.sh
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --console=plain --stacktrace
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest
+        run: ./gradlew testDebugUnitTest --console=plain --stacktrace
       - name: Run Android lint
-        run: ./gradlew lintDebug
+        run: ./gradlew lintDebug --console=plain --stacktrace
+      - name: Upload build failure reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-ci-build-failure-reports
+          path: |
+            app/build/reports/**
+            app/build/test-results/**
+            app/build/outputs/lint-results-debug.*
+          if-no-files-found: warn
 
   connected-emulator-test:
     runs-on: ubuntu-latest
@@ -38,6 +53,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
+      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v4
       - name: Enable KVM for emulator acceleration
         run: |
@@ -53,6 +70,18 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
           script: |
+            mkdir -p "$RUNNER_TEMP/openvta-android-ci"
             adb emu geo fix 126.9780 37.5665 38 9 5.40
-            ./gradlew connectedDebugAndroidTest
-            ./scripts/emulator_verify.sh
+            ./gradlew connectedDebugAndroidTest --console=plain --stacktrace
+            SCREENSHOT_DIR="$RUNNER_TEMP/openvta-android-ci" ./scripts/emulator_verify.sh
+      - name: Upload emulator failure reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-ci-emulator-failure-reports
+          path: |
+            app/build/reports/**
+            app/build/outputs/androidTest-results/**
+            app/build/outputs/connected_android_test_additional_output/**
+            ${{ runner.temp }}/openvta-android-ci/**
+          if-no-files-found: warn
