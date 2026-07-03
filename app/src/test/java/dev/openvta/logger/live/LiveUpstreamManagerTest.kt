@@ -100,6 +100,43 @@ class LiveUpstreamManagerTest {
     }
 
     @Test
+    fun flushPendingDoesNotLetOldFailedEntryBlockFreshTelemetry() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings()
+        val sentIds = mutableListOf<String>()
+        val oldFailed = repository.enqueue("telemetry", "old_recording", 1, 1, "sha256:old", """{"stream":"telemetry"}""")
+        repository.markFailed(oldFailed.id)
+        val fresh = repository.enqueue("telemetry", "fresh_recording", 1, 1, "sha256:fresh", """{"stream":"telemetry"}""")
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    sentIds += entry.id
+                    if (entry.id == oldFailed.id) return LiveSyncResult.failed()
+                    return LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
+                }
+            },
+            executor = Executor { it.run() },
+        )
+
+        assertEquals(1, manager.flushPending())
+
+        assertEquals(listOf(fresh.id, oldFailed.id), sentIds)
+        val remaining = repository.listPending()
+        assertEquals(1, remaining.size)
+        assertEquals(oldFailed.id, remaining.single().id)
+        assertEquals(LiveOutboxStatus.Failed, remaining.single().status)
+    }
+
+    @Test
     fun missingRangeCommandRequeuesOnlyRequestedRangeBeforeFlushing() {
         val repository = LiveOutboxRepository(temporaryFolder.root)
         val settings = liveSettings()

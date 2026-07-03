@@ -154,11 +154,20 @@ enum class LiveOutboxStatus {
 }
 
 internal val liveOutboxEntryComparator: Comparator<LiveOutboxEntry> =
-    compareBy<LiveOutboxEntry> { it.createdAtMillis }
+    compareBy<LiveOutboxEntry> { liveOutboxStatusOrder(it.status) }
+        .thenBy { it.createdAtMillis }
         .thenBy { liveOutboxKindOrder(it.kind) }
         .thenBy { it.seqStart }
         .thenBy { it.seqEnd }
         .thenBy { it.id }
+
+private fun liveOutboxStatusOrder(status: LiveOutboxStatus): Int =
+    when (status) {
+        LiveOutboxStatus.Pending,
+        LiveOutboxStatus.Sent -> 0
+        LiveOutboxStatus.Failed -> 1
+        LiveOutboxStatus.Acked -> 2
+    }
 
 private fun liveOutboxKindOrder(kind: String): Int =
     when (kind) {
