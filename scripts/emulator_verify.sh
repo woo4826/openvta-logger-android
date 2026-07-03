@@ -107,9 +107,13 @@ dismiss_blocking_system_dialogs() {
 
 tap_text() {
   local text="$1"
-  local bounds x1 y1 x2 y2 x y
+  local ui bounds x1 y1 x2 y2 x y
   for _ in {1..10}; do
-    bounds="$(text_bounds "$text")"
+    ui="$(dump_ui)"
+    if dismiss_blocking_system_dialogs "$ui"; then
+      continue
+    fi
+    bounds="$(text_bounds_in_ui "$ui" "$text")"
     if [[ -n "$bounds" ]]; then
       read -r x1 y1 x2 y2 <<< "$bounds"
       x=$(((x1 + x2) / 2))
