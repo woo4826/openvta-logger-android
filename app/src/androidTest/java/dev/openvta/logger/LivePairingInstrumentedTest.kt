@@ -93,11 +93,9 @@ class LivePairingInstrumentedTest {
     }
 
     @Test
-    fun liveQrActionsLaunchScannerAndImagePickerHandoffs() {
+    fun liveQrScanActionLaunchesScannerHandoff() {
         navigateToLiveSettings()
         intending(hasComponent(CaptureActivity::class.java.name))
-            .respondWith(android.app.Instrumentation.ActivityResult(Activity.RESULT_CANCELED, Intent()))
-        intending(allOf(hasAction(Intent.ACTION_GET_CONTENT), hasType("image/*")))
             .respondWith(android.app.Instrumentation.ActivityResult(Activity.RESULT_CANCELED, Intent()))
 
         compose.onNodeWithTag("live-scan-qr-button").performScrollTo()
@@ -112,6 +110,13 @@ class LivePairingInstrumentedTest {
                 hasExtra("SCAN_ORIENTATION_LOCKED", false),
             ),
         )
+    }
+
+    @Test
+    fun liveQrImageActionLaunchesImagePickerHandoff() {
+        navigateToLiveSettings()
+        intending(allOf(hasAction(Intent.ACTION_GET_CONTENT), hasType("image/*")))
+            .respondWith(android.app.Instrumentation.ActivityResult(Activity.RESULT_CANCELED, Intent()))
 
         compose.onNodeWithTag("live-qr-image-button").performScrollTo()
         compose.onNodeWithTag("live-qr-image-button").performClick()
