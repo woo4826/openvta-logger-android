@@ -95,6 +95,7 @@ import dev.openvta.logger.domain.SessionVisualization
 import dev.openvta.logger.domain.UploadState
 import dev.openvta.logger.domain.VtaLogParser
 import dev.openvta.logger.domain.VtaTraceEnhancer
+import dev.openvta.logger.live.LiveCredentialRotationPayload
 import dev.openvta.logger.live.LiveRegistrationClient
 import dev.openvta.logger.live.LiveRegistrationQrPayload
 import dev.openvta.logger.recording.RecordingForegroundService
@@ -252,6 +253,28 @@ private fun OpenVtaLoggerAppScreen(
     var liveRegistrationBusy by remember { mutableStateOf(false) }
     val liveRegistrationClient = remember { LiveRegistrationClient() }
 
+    fun applyLiveCredentialRotation(rawPayload: String) {
+        coroutineScope.launch {
+            runCatching {
+                val payload = LiveCredentialRotationPayload.parse(rawPayload)
+                withContext(Dispatchers.IO) {
+                    val current = app.container.settingsRepository.load()
+                    val updated = payload.applyTo(current)
+                    app.container.settingsRepository.save(updated)
+                    updated
+                }
+            }
+                .onSuccess { updated ->
+                    onSettingsChange(updated)
+                    app.container.liveUpstreamManager.refreshCommandConnection()
+                    app.container.updateStatus { it.copy(lastMessage = "Live credentials rotated") }
+                }
+                .onFailure { exception ->
+                    app.container.updateStatus { it.copy(lastMessage = "Live credential rotation failed: ${exception.message}") }
+                }
+        }
+    }
+
     fun registerLivePayload(payload: LiveRegistrationQrPayload, sourceLabel: String) {
         if (!liveRegistrationBusy) {
             coroutineScope.launch {
@@ -297,11 +320,15 @@ private fun OpenVtaLoggerAppScreen(
     }
 
     val registerLiveFromQr: (String) -> Unit = { rawQr ->
-        runCatching { LiveRegistrationQrPayload.parse(rawQr, fallbackBaseUrl = settings.liveBaseUrl) }
-            .onSuccess { registerLivePayload(it, "Live QR") }
-            .onFailure { exception ->
-                app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
-            }
+        if (runCatching { LiveCredentialRotationPayload.parse(rawQr) }.onSuccess { applyLiveCredentialRotation(rawQr) }.isSuccess) {
+            Unit
+        } else {
+            runCatching { LiveRegistrationQrPayload.parse(rawQr, fallbackBaseUrl = settings.liveBaseUrl) }
+                .onSuccess { registerLivePayload(it, "Live QR") }
+                .onFailure { exception ->
+                    app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
+                }
+        }
     }
 
     val liveQrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -512,6 +539,7 @@ private fun OpenVtaLoggerAppScreen(
                     liveQrImageLauncher.launch("image/*")
                 },
                 onRegisterLiveCode = registerLiveFromCode,
+                onApplyLiveCredentialRotation = ::applyLiveCredentialRotation,
                 onSave = {
                     app.container.settingsRepository.save(settings)
                     app.container.liveUpstreamManager.refreshCommandConnection()
@@ -692,6 +720,7 @@ private fun SettingsScreen(
     onScanLiveQr: () -> Unit,
     onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
+    onApplyLiveCredentialRotation: (String) -> Unit,
     onSave: () -> Unit,
 ) {
     var selectedSection by remember { mutableStateOf(SettingsSectionTab.General) }
@@ -720,6 +749,7 @@ private fun SettingsScreen(
                     onScanLiveQr = onScanLiveQr,
                     onSelectLiveQrImage = onSelectLiveQrImage,
                     onRegisterLiveCode = onRegisterLiveCode,
+                    onApplyLiveCredentialRotation = onApplyLiveCredentialRotation,
                 )
                 SettingsSectionTab.Ftp -> FtpSettingsCard(
                     settings = settings,
@@ -892,11 +922,13 @@ private fun LiveSettingsCard(
     onScanLiveQr: () -> Unit,
     onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
+    onApplyLiveCredentialRotation: (String) -> Unit,
 ) {
     var manualLiveBaseUrl by remember(settings.liveBaseUrl) {
         mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
     }
     var manualRegistrationCode by remember { mutableStateOf("") }
+    var rotationPayload by remember { mutableStateOf("") }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("OpenVTA Live", style = MaterialTheme.typography.titleMedium)
@@ -964,6 +996,35 @@ private fun LiveSettingsCard(
                 Icon(Icons.Default.CloudUpload, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text(if (liveRegistrationBusy) "Registering" else "Register with code")
+            }
+            HorizontalDivider()
+            Text("Credential rotation", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "Paste the one-time rotation payload from OpenVTA Live after rotating this device in web or admin.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = rotationPayload,
+                onValueChange = { rotationPayload = it },
+                label = { Text("Rotation payload") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("live-credential-rotation-payload-field"),
+                minLines = 3,
+                maxLines = 6,
+            )
+            Button(
+                modifier = Modifier.testTag("live-apply-credential-rotation-button"),
+                onClick = {
+                    onApplyLiveCredentialRotation(rotationPayload)
+                    rotationPayload = ""
+                },
+                enabled = rotationPayload.isNotBlank(),
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Apply rotation")
             }
             Text("Connection", style = MaterialTheme.typography.labelLarge)
             Text(

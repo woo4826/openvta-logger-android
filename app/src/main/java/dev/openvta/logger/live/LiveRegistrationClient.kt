@@ -1,5 +1,6 @@
 package dev.openvta.logger.live
 
+import dev.openvta.logger.domain.AppSettings
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
@@ -124,3 +125,54 @@ data class LiveRegistrationResult(
     val wssCredential: String,
     val apiCredential: String,
 )
+
+data class LiveCredentialRotationPayload(
+    val baseUrl: String?,
+    val tenantId: String?,
+    val deviceId: String,
+    val mqttCredential: String,
+    val wssCredential: String,
+    val apiCredential: String,
+) {
+    fun applyTo(settings: AppSettings): AppSettings {
+        require(settings.liveDeviceId == deviceId) { "Credential payload is for a different device" }
+        return settings.copy(
+            liveEnabled = true,
+            liveBaseUrl = baseUrl ?: settings.liveBaseUrl,
+            liveTenantId = tenantId ?: settings.liveTenantId,
+            liveDeviceId = deviceId,
+            liveMqttCredential = mqttCredential,
+            liveWssCredential = wssCredential,
+            liveApiCredential = apiCredential,
+        )
+    }
+
+    companion object {
+        fun parse(raw: String): LiveCredentialRotationPayload {
+            val trimmed = raw.trim()
+            require(trimmed.isNotBlank()) { "Live credential payload is empty" }
+            val json = JSONObject(trimmed)
+            require(json.optString("type") == TYPE) { "not an OpenVTA Live credential rotation payload" }
+            val credentials = json.getJSONObject("credentials")
+            val baseUrl = json.optString("baseUrl").takeIf { it.isNotBlank() }?.trim()?.trimEnd('/')
+            if (baseUrl != null) {
+                require(baseUrl.startsWith("https://") || baseUrl.startsWith("http://")) { "Live server URL must start with http:// or https://" }
+            }
+            return LiveCredentialRotationPayload(
+                baseUrl = baseUrl,
+                tenantId = json.optString("tenantId").takeIf { it.isNotBlank() },
+                deviceId = json.getString("deviceId").trim(),
+                mqttCredential = credentials.getString("mqtt").trim(),
+                wssCredential = credentials.getString("wss").trim(),
+                apiCredential = credentials.getString("api").trim(),
+            ).also { payload ->
+                require(payload.deviceId.isNotBlank()) { "Live device id is required" }
+                require(payload.mqttCredential.isNotBlank()) { "MQTT credential is required" }
+                require(payload.wssCredential.isNotBlank()) { "WSS credential is required" }
+                require(payload.apiCredential.isNotBlank()) { "API credential is required" }
+            }
+        }
+
+        const val TYPE = "openvta-live-credential-rotation"
+    }
+}
