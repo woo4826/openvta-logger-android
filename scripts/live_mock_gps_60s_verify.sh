@@ -27,6 +27,12 @@ LIVE_WSS_CREDENTIAL="${LIVE_WSS_CREDENTIAL:-}"
 LIVE_API_CREDENTIAL="${LIVE_API_CREDENTIAL:-}"
 LIVE_ENABLED="${LIVE_ENABLED:-}"
 LIVE_OUTBOX_WAIT_SECONDS="${LIVE_OUTBOX_WAIT_SECONDS:-45}"
+LIVE_OFFLINE_BACKLOG="${LIVE_OFFLINE_BACKLOG:-0}"
+LIVE_SERVER_VERIFY="${LIVE_SERVER_VERIFY:-0}"
+LIVE_SERVER_BASE_URL="${LIVE_SERVER_BASE_URL:-$LIVE_BASE_URL}"
+LIVE_SERVER_WAIT_SECONDS="${LIVE_SERVER_WAIT_SECONDS:-90}"
+LIVE_SESSION_COOKIE="${LIVE_SESSION_COOKIE:-}"
+NETWORK_RESTORE_WAIT_SECONDS="${NETWORK_RESTORE_WAIT_SECONDS:-8}"
 
 SEOUL_LAT_MIN="${SEOUL_LAT_MIN:-37.50}"
 SEOUL_LAT_MAX="${SEOUL_LAT_MAX:-37.62}"
@@ -51,6 +57,7 @@ CRASH_MARKERS_FILE="$ARTIFACT_DIR/crash_anr_markers.txt"
 SUMMARY_FILE="$ARTIFACT_DIR/summary.txt"
 LIVE_OUTBOX_STATUS_FILE="$ARTIFACT_DIR/live_outbox_status.txt"
 SHOULD_STOP_RECORDING=0
+NETWORK_FORCED_OFFLINE=0
 
 if [[ -z "$LIVE_ENABLED" ]]; then
   if [[ -n "$LIVE_BASE_URL" && -n "$LIVE_TENANT_ID" && -n "$LIVE_DEVICE_ID" && -n "$LIVE_API_CREDENTIAL" ]]; then
@@ -65,6 +72,16 @@ if [[ "$LIVE_ENABLED" == "1" ]]; then
     echo "LIVE_ENABLED=1 requires LIVE_BASE_URL, LIVE_TENANT_ID, LIVE_DEVICE_ID, and LIVE_API_CREDENTIAL." >&2
     exit 1
   fi
+fi
+
+if [[ "$LIVE_OFFLINE_BACKLOG" == "1" && "$LIVE_ENABLED" != "1" ]]; then
+  echo "LIVE_OFFLINE_BACKLOG=1 requires Live credentials and LIVE_ENABLED=1." >&2
+  exit 1
+fi
+
+if [[ "$LIVE_SERVER_VERIFY" == "1" && -z "$LIVE_SESSION_COOKIE" ]]; then
+  echo "LIVE_SERVER_VERIFY=1 requires LIVE_SESSION_COOKIE with a session cookie value." >&2
+  exit 1
 fi
 
 resolve_serial() {
@@ -89,10 +106,42 @@ adb_device() {
   "$ADB" -s "$SERIAL" "$@"
 }
 
+force_device_network_offline() {
+  printf "Forcing emulator network offline for Live backlog capture.\n"
+  NETWORK_FORCED_OFFLINE=1
+  adb_device shell cmd connectivity airplane-mode enable >/dev/null 2>&1 || true
+  adb_device shell settings put global airplane_mode_on 1 >/dev/null 2>&1 || true
+  adb_device shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true >/dev/null 2>&1 || true
+  adb_device shell svc wifi disable >/dev/null 2>&1 || true
+  adb_device shell svc data disable >/dev/null 2>&1 || true
+  sleep 3
+}
+
+restore_device_network() {
+  printf "Restoring emulator network for Live backlog flush.\n"
+  adb_device shell svc data enable >/dev/null 2>&1 || true
+  adb_device shell svc wifi enable >/dev/null 2>&1 || true
+  adb_device shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
+  adb_device shell settings put global airplane_mode_on 0 >/dev/null 2>&1 || true
+  adb_device shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false >/dev/null 2>&1 || true
+  NETWORK_FORCED_OFFLINE=0
+  sleep "$NETWORK_RESTORE_WAIT_SECONDS"
+}
+
+trigger_live_retry() {
+  if [[ "$LIVE_ENABLED" != "1" ]]; then
+    return
+  fi
+  adb_device shell am start -n "$ACTIVITY" --ez debugRetryLiveUpstream true >/dev/null 2>&1 || true
+}
+
 cleanup() {
   local status=$?
   if [[ -n "${SERIAL:-}" && "$SHOULD_STOP_RECORDING" == "1" ]]; then
     adb_device shell am start -n "$ACTIVITY" --ez debugStopRecording true >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${SERIAL:-}" && "$NETWORK_FORCED_OFFLINE" == "1" ]]; then
+    restore_device_network >/dev/null 2>&1 || true
   fi
   if [[ -n "${SERIAL:-}" ]]; then
     adb_device shell cmd location providers set-test-provider-enabled "$GPS_PROVIDER" false >/dev/null 2>&1 || true
@@ -250,6 +299,99 @@ wait_for_live_outbox_acked() {
   exit 1
 }
 
+manifest_is_completed_downloadable() {
+  local manifest_file="$1"
+  python3 - "$manifest_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+recording = body.get("recording") or {}
+segments = body.get("segments") or []
+missing = body.get("missingRanges") or []
+downloadable = bool(body.get("downloadable"))
+status = recording.get("status")
+sample_count = int(recording.get("sampleCount") or 0)
+if status == "completed" and downloadable and segments and not missing and sample_count > 0:
+    sys.exit(0)
+print(
+    "status=%s downloadable=%s segments=%s missing=%s sampleCount=%s"
+    % (status, downloadable, len(segments), missing, sample_count)
+)
+sys.exit(1)
+PY
+}
+
+telemetry_response_has_points() {
+  local telemetry_file="$1"
+  local recording_id="$2"
+  python3 - "$telemetry_file" "$recording_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+recording_id = sys.argv[2]
+telemetry = body.get("telemetry") or []
+if any(item.get("recordingId") == recording_id for item in telemetry):
+    sys.exit(0)
+print("telemetry missing recordingId=%s count=%s" % (recording_id, len(telemetry)))
+sys.exit(1)
+PY
+}
+
+wait_for_server_recording() {
+  if [[ "$LIVE_SERVER_VERIFY" != "1" ]]; then
+    return
+  fi
+
+  local recording_id="$1"
+  local manifest_file="$ARTIFACT_DIR/server_manifest.json"
+  local manifest_status_file="$ARTIFACT_DIR/server_manifest_status.txt"
+  local telemetry_file="$ARTIFACT_DIR/server_telemetry.json"
+  local telemetry_status_file="$ARTIFACT_DIR/server_telemetry_status.txt"
+  local download_file="$ARTIFACT_DIR/server_download.Vta"
+  local deadline http_status
+
+  deadline=$((SECONDS + LIVE_SERVER_WAIT_SECONDS))
+  while (( SECONDS < deadline )); do
+    http_status="$(curl -sS -o "$manifest_file" -w "%{http_code}" \
+      -H "cookie: $LIVE_SESSION_COOKIE" \
+      "$LIVE_SERVER_BASE_URL/api/recordings/$recording_id/manifest" || true)"
+    if [[ "$http_status" == "200" ]] && manifest_is_completed_downloadable "$manifest_file" > "$manifest_status_file" 2>&1; then
+      http_status="$(curl -sS -o "$telemetry_file" -w "%{http_code}" \
+        -H "cookie: $LIVE_SESSION_COOKIE" \
+        "$LIVE_SERVER_BASE_URL/api/devices/$LIVE_DEVICE_ID/telemetry?limit=1" || true)"
+      if [[ "$http_status" != "200" ]] || ! telemetry_response_has_points "$telemetry_file" "$recording_id" > "$telemetry_status_file" 2>&1; then
+        {
+          printf "telemetryHttpStatus=%s\n" "$http_status"
+          cat "$telemetry_status_file" 2>/dev/null || true
+        } > "$ARTIFACT_DIR/server_wait_last_status.txt"
+        sleep 3
+        continue
+      fi
+      curl -fsS -o "$download_file" \
+        -H "cookie: $LIVE_SESSION_COOKIE" \
+        "$LIVE_SERVER_BASE_URL/api/recordings/$recording_id/download"
+      if [[ -s "$download_file" ]]; then
+        printf "serverManifest=%s\nserverTelemetry=%s\nserverDownload=%s\n" "$manifest_file" "$telemetry_file" "$download_file" >> "$SUMMARY_FILE"
+        return
+      fi
+    else
+      {
+        printf "httpStatus=%s\n" "$http_status"
+        cat "$manifest_status_file" 2>/dev/null || true
+      } > "$ARTIFACT_DIR/server_wait_last_status.txt"
+    fi
+    sleep 3
+  done
+
+  echo "Timed out waiting for server recording to become completed and downloadable: $recording_id" >&2
+  cat "$ARTIFACT_DIR/server_wait_last_status.txt" >&2 2>/dev/null || true
+  exit 1
+}
+
 assert_vta_content() {
   local vta_file="$1"
   local meta_file="$2"
@@ -335,6 +477,10 @@ adb_device shell wm dismiss-keyguard >/dev/null 2>&1 || true
 PREVIOUS_VTA="$(latest_remote_file Vta || true)"
 adb_device logcat -c || true
 
+if [[ "$LIVE_OFFLINE_BACKLOG" == "1" ]]; then
+  force_device_network_offline
+fi
+
 start_args=(
   shell am start -n "$ACTIVITY"
   --ez debugApplySettings true
@@ -365,6 +511,10 @@ inject_mock_route
 adb_device shell am start -n "$ACTIVITY" --ez debugStopRecording true >/dev/null
 SHOULD_STOP_RECORDING=0
 wait_for_vta_footer "$REMOTE_VTA"
+if [[ "$LIVE_OFFLINE_BACKLOG" == "1" ]]; then
+  restore_device_network
+fi
+trigger_live_retry
 sleep 3
 wait_for_live_outbox_acked
 
@@ -376,6 +526,11 @@ copy_remote_text_file "$REMOTE_META" "$LOCAL_META"
 
 assert_no_crash_or_anr
 assert_vta_content "$LOCAL_VTA" "$LOCAL_META"
+wait_for_server_recording "$(basename "$REMOTE_VTA" .Vta)"
+if [[ "$LIVE_SERVER_VERIFY" == "1" ]] && ! cmp -s "$LOCAL_VTA" "$ARTIFACT_DIR/server_download.Vta"; then
+  echo "Server downloaded VTA does not match the local VTA artifact." >&2
+  exit 1
+fi
 adb_device exec-out screencap -p > "$ARTIFACT_DIR/after_60s.png" || true
 
 {
@@ -392,6 +547,8 @@ adb_device exec-out screencap -p > "$ARTIFACT_DIR/after_60s.png" || true
   printf "screenshot=%s\n" "$ARTIFACT_DIR/after_60s.png"
   printf "liveEnabled=%s\n" "$LIVE_ENABLED"
   printf "liveDeviceId=%s\n" "$LIVE_DEVICE_ID"
+  printf "liveOfflineBacklog=%s\n" "$LIVE_OFFLINE_BACKLOG"
+  printf "liveServerVerify=%s\n" "$LIVE_SERVER_VERIFY"
   printf "liveOutboxStatus=%s\n" "$LIVE_OUTBOX_STATUS_FILE"
 } >> "$SUMMARY_FILE"
 

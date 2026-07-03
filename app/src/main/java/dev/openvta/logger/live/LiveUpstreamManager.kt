@@ -14,6 +14,7 @@ class LiveUpstreamManager(
     private val vtaUploadClient: LiveVtaUploadClient = LiveHttpSyncClient(),
     private val commandClient: LiveCommandClient = LiveCommandClient(),
     private val commandActionHandler: LiveCommandActionHandler = NoopLiveCommandActionHandler,
+    private val resolveRecordingSession: (String) -> RecordingSession? = { null },
     private val executor: Executor = defaultExecutor(),
 ) : LiveCommandExecutor {
     constructor(
@@ -50,15 +51,15 @@ class LiveUpstreamManager(
         flushAsync(uploadSession = session)
     }
 
-    fun flushPending(): Int = flushPending(deferVtaMetadata = false)
+    fun flushPending(): Int = flushPending(allowVtaMetadataForRecordingId = null)
 
-    private fun flushPending(deferVtaMetadata: Boolean): Int {
+    private fun flushPending(allowVtaMetadataForRecordingId: String?): Int {
         val settings = loadSettings()
         if (!LiveProtocol.isConfigured(settings)) return 0
         refreshCommandConnection(settings)
         var acked = 0
         for (entry in outboxRepository.listPending()) {
-            if (deferVtaMetadata && entry.isVtaMetadata()) continue
+            if (entry.isVtaMetadata() && entry.recordingId != allowVtaMetadataForRecordingId) continue
             outboxRepository.markSent(entry.id)
             val result = runCatching { syncClient.send(settings, entry) }.getOrDefault(LiveSyncResult.failed())
             if (!result.delivered) {
@@ -82,6 +83,13 @@ class LiveUpstreamManager(
     fun refreshCommandConnection() {
         val settings = loadSettings()
         if (LiveProtocol.isConfigured(settings)) refreshCommandConnection(settings)
+    }
+
+    fun retryPending() {
+        executor.execute {
+            runCatching { flushPending() }
+            runCatching { retryPendingVtaUploads() }
+        }
     }
 
     fun pendingCount(): Int = outboxRepository.listPending().size
@@ -148,19 +156,37 @@ class LiveUpstreamManager(
         outboxRepository.enqueue("manifest", session.id, chunks.first().seqStart, chunks.last().seqEnd, manifest.payloadHash, manifest.payloadJson)
     }
 
+    private fun retryPendingVtaUploads(): Int {
+        val settings = loadSettings()
+        if (!LiveProtocol.isConfigured(settings)) return 0
+        var acked = 0
+        val recordingIds = outboxRepository.listPending()
+            .filter { it.isVtaMetadata() }
+            .map { it.recordingId }
+            .distinct()
+        for (recordingId in recordingIds) {
+            val session = resolveRecordingSession(recordingId) ?: continue
+            val uploaded = runCatching { vtaUploadClient.uploadVta(settings, session) }.getOrDefault(false)
+            if (uploaded) {
+                acked += flushPending(allowVtaMetadataForRecordingId = recordingId)
+            }
+        }
+        return acked
+    }
+
     private fun flushAsync(uploadSession: RecordingSession? = null) {
         executor.execute {
             if (uploadSession == null) {
                 runCatching { flushPending() }
                 return@execute
             }
-            runCatching { flushPending(deferVtaMetadata = true) }
+            runCatching { flushPending() }
             val uploaded = runCatching {
                 val settings = loadSettings()
                 LiveProtocol.isConfigured(settings) && vtaUploadClient.uploadVta(settings, uploadSession)
             }.getOrDefault(false)
             if (uploaded) {
-                runCatching { flushPending() }
+                runCatching { flushPending(allowVtaMetadataForRecordingId = uploadSession.id) }
             }
         }
     }

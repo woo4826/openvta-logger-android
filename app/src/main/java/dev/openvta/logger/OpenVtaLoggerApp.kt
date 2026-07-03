@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Activity
 import android.app.Application
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import androidx.core.content.ContextCompat
@@ -35,6 +37,7 @@ class OpenVtaLoggerApp : Application() {
                     foregroundActivityCount += 1
                     if (::container.isInitialized) {
                         container.liveUpstreamManager.refreshCommandConnection()
+                        container.liveUpstreamManager.retryPending()
                     }
                 }
 
@@ -75,6 +78,7 @@ class AppContainer(app: OpenVtaLoggerApp) {
         loadSettings = settingsRepository::load,
         outboxRepository = liveOutboxRepository,
         commandClient = liveCommandClient,
+        resolveRecordingSession = recordingRepository::loadSession,
         commandActionHandler = object : LiveCommandActionHandler {
             override fun startRecording(): LiveCommandResult {
                 if (status.value.isRecording) {
@@ -100,6 +104,10 @@ class AppContainer(app: OpenVtaLoggerApp) {
         },
     ).also { it.refreshCommandConnection() }
 
+    init {
+        registerLiveNetworkRetry(app)
+    }
+
     fun updateStatus(transform: (RecordingStatus) -> RecordingStatus) {
         mutableStatus.update(transform)
     }
@@ -111,6 +119,19 @@ class AppContainer(app: OpenVtaLoggerApp) {
             is LiveCommandConnectionEvent.Closed -> "Live command channel closed: ${event.code} ${event.reason}".trim()
         }
         updateStatus { it.copy(lastMessage = message) }
+    }
+
+    private fun registerLiveNetworkRetry(app: OpenVtaLoggerApp) {
+        val connectivityManager = app.getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        liveUpstreamManager.retryPending()
+                    }
+                },
+            )
+        }
     }
 
     private fun recordingCommandFailure(action: String, throwable: Throwable): LiveCommandResult {

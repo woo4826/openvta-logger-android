@@ -138,6 +138,10 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(EXTRA_AUTOMATION_APPLY_SETTINGS, false)) {
             applyAutomationSettings(intent)
         }
+        if (intent.getBooleanExtra(EXTRA_AUTOMATION_RETRY_LIVE_UPSTREAM, false)) {
+            val app = application as OpenVtaLoggerApp
+            app.container.liveUpstreamManager.retryPending()
+        }
         when {
             intent.getBooleanExtra(EXTRA_AUTOMATION_START, false) -> {
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -205,6 +209,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AUTOMATION_APPLY_SETTINGS = "debugApplySettings"
         const val EXTRA_AUTOMATION_START = "debugStartRecording"
         const val EXTRA_AUTOMATION_STOP = "debugStopRecording"
+        const val EXTRA_AUTOMATION_RETRY_LIVE_UPSTREAM = "debugRetryLiveUpstream"
         const val EXTRA_AUTOMATION_DRIVER_ID = "debugDriverId"
         const val EXTRA_AUTOMATION_FTP_HOST = "debugFtpHost"
         const val EXTRA_AUTOMATION_FTP_PORT = "debugFtpPort"

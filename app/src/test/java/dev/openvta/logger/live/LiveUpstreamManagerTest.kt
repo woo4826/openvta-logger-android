@@ -273,6 +273,104 @@ class LiveUpstreamManagerTest {
         assertEquals(listOf(LiveOutboxStatus.Pending, LiveOutboxStatus.Pending), pending.map { it.status })
     }
 
+    @Test
+    fun genericRetryDoesNotAckVtaMetadataBeforeVtaUploadSucceeds() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings().copy(liveMqttCredential = "mqtt_secret")
+        val deliveredKinds = mutableListOf<String>()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    deliveredKinds += entry.kind
+                    return LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
+                }
+            },
+            vtaUploadClient = object : LiveVtaUploadClient {
+                override fun uploadVta(settings: AppSettings, session: RecordingSession): Boolean = false
+            },
+            executor = Executor { it.run() },
+        )
+        val vtaFile = temporaryFolder.newFile("recording_03.Vta").apply { writeText("VTA\nGPS\n") }
+        val session = RecordingSession(
+            id = "recording_03",
+            driverId = "CC00",
+            startedAtMillis = 1L,
+            vtaFile = vtaFile,
+            zipFile = File(temporaryFolder.root, "recording_03.Zip"),
+        )
+
+        manager.onRecordingStopped(session)
+        manager.flushPending()
+
+        assertEquals(listOf("status"), deliveredKinds)
+        val pending = repository.listPending()
+        assertEquals(listOf("chunk-meta", "manifest"), pending.map { it.kind })
+        assertEquals(listOf(LiveOutboxStatus.Pending, LiveOutboxStatus.Pending), pending.map { it.status })
+    }
+
+    @Test
+    fun retryPendingUploadsVtaBeforeAckingPendingVtaMetadata() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings().copy(liveMqttCredential = "mqtt_secret")
+        val deliveredKinds = mutableListOf<String>()
+        val uploadedRecordings = mutableListOf<String>()
+        val vtaFile = temporaryFolder.newFile("recording_04.Vta").apply { writeText("VTA\nGPS\n") }
+        val session = RecordingSession(
+            id = "recording_04",
+            driverId = "CC00",
+            startedAtMillis = 1L,
+            vtaFile = vtaFile,
+            zipFile = File(temporaryFolder.root, "recording_04.Zip"),
+        )
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    deliveredKinds += entry.kind
+                    return LiveSyncResult.delivered(
+                        LiveServerAck(
+                            deviceId = settings.liveDeviceId,
+                            recordingId = entry.recordingId,
+                            ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                            acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                        ),
+                    )
+                }
+            },
+            vtaUploadClient = object : LiveVtaUploadClient {
+                private var first = true
+
+                override fun uploadVta(settings: AppSettings, session: RecordingSession): Boolean {
+                    uploadedRecordings += session.id
+                    if (first) {
+                        first = false
+                        return false
+                    }
+                    return true
+                }
+            },
+            resolveRecordingSession = { recordingId -> if (recordingId == session.id) session else null },
+            executor = Executor { it.run() },
+        )
+
+        manager.onRecordingStopped(session)
+        manager.retryPending()
+
+        assertEquals(listOf("recording_04", "recording_04"), uploadedRecordings)
+        assertEquals(listOf("status", "chunk-meta", "manifest"), deliveredKinds)
+        assertEquals(0, manager.pendingCount())
+    }
+
     private fun liveSettings(): AppSettings = AppSettings(
         liveEnabled = true,
         liveBaseUrl = "https://openvta-live.kro.kr",
