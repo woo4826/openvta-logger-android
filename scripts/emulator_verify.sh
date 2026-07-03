@@ -74,6 +74,37 @@ text_bounds() {
     | sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p'
 }
 
+text_bounds_in_ui() {
+  local ui="$1"
+  local text="$2"
+  awk -v text_target="text=\"$text\"" -v desc_target="content-desc=\"$text\"" 'BEGIN { RS = "<" } index($0, text_target) || index($0, desc_target) { print; exit }' <<< "$ui" \
+    | sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p'
+}
+
+tap_text_in_ui() {
+  local ui="$1"
+  local text="$2"
+  local bounds x1 y1 x2 y2 x y
+  bounds="$(text_bounds_in_ui "$ui" "$text")"
+  if [[ -z "$bounds" ]]; then
+    return 1
+  fi
+  read -r x1 y1 x2 y2 <<< "$bounds"
+  x=$(((x1 + x2) / 2))
+  y=$(((y1 + y2) / 2))
+  "$ADB" shell input tap "$x" "$y"
+}
+
+dismiss_blocking_system_dialogs() {
+  local ui="$1"
+  if grep -q "isn't responding" <<< "$ui"; then
+    tap_text_in_ui "$ui" "Wait" || tap_text_in_ui "$ui" "Close app" || true
+    sleep 2
+    return 0
+  fi
+  return 1
+}
+
 tap_text() {
   local text="$1"
   local bounds x1 y1 x2 y2 x y
@@ -143,6 +174,9 @@ wait_for_text() {
   local ui
   for _ in {1..20}; do
     ui="$(dump_ui)"
+    if dismiss_blocking_system_dialogs "$ui"; then
+      continue
+    fi
     if grep -q "text=\"$text\"" <<< "$ui" || grep -q "content-desc=\"$text\"" <<< "$ui"; then
       return 0
     fi
@@ -158,6 +192,9 @@ wait_for_ui_contains() {
   local ui
   for _ in {1..20}; do
     ui="$(dump_ui)"
+    if dismiss_blocking_system_dialogs "$ui"; then
+      continue
+    fi
     if grep -Fq "$text" <<< "$ui"; then
       return 0
     fi
@@ -173,6 +210,9 @@ wait_for_ui_regex() {
   local ui
   for _ in {1..20}; do
     ui="$(dump_ui)"
+    if dismiss_blocking_system_dialogs "$ui"; then
+      continue
+    fi
     if grep -Eq "$regex" <<< "$ui"; then
       return 0
     fi
@@ -188,6 +228,9 @@ wait_for_text_with_scroll() {
   local ui
   for _ in {1..22}; do
     ui="$(dump_ui)"
+    if dismiss_blocking_system_dialogs "$ui"; then
+      continue
+    fi
     if grep -q "text=\"$text\"" <<< "$ui" || grep -q "content-desc=\"$text\"" <<< "$ui"; then
       return 0
     fi
