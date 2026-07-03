@@ -72,6 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -695,7 +696,7 @@ private fun SettingsScreen(
 ) {
     var selectedSection by remember { mutableStateOf(SettingsSectionTab.General) }
     LazyColumn(
-        modifier = modifier,
+        modifier = modifier.testTag("settings-list"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -835,6 +836,7 @@ private fun SettingsHeaderCard(
             TabRow(selectedTabIndex = SettingsSectionTab.entries.indexOf(selectedSection)) {
                 SettingsSectionTab.entries.forEach { section ->
                     Tab(
+                        modifier = Modifier.testTag("settings-section-${section.label.lowercase(Locale.US)}"),
                         selected = selectedSection == section,
                         onClick = { onSectionSelected(section) },
                         text = { Text(section.label) },
@@ -917,6 +919,7 @@ private fun LiveSettingsCard(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
+                    modifier = Modifier.testTag("live-scan-qr-button"),
                     onClick = onScanLiveQr,
                     enabled = !liveRegistrationBusy,
                 ) {
@@ -925,6 +928,7 @@ private fun LiveSettingsCard(
                     Text(if (liveRegistrationBusy) "Registering" else "Scan QR")
                 }
                 Button(
+                    modifier = Modifier.testTag("live-qr-image-button"),
                     onClick = onSelectLiveQrImage,
                     enabled = !liveRegistrationBusy,
                 ) {
@@ -937,18 +941,23 @@ private fun LiveSettingsCard(
                 value = manualLiveBaseUrl,
                 onValueChange = { manualLiveBaseUrl = it },
                 label = { Text("Live server URL") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("live-base-url-field"),
                 singleLine = true,
             )
             OutlinedTextField(
                 value = manualRegistrationCode,
                 onValueChange = { manualRegistrationCode = it },
                 label = { Text("6 digit pairing code") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("live-registration-code-field"),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             Button(
+                modifier = Modifier.testTag("live-register-code-button"),
                 onClick = { onRegisterLiveCode(manualLiveBaseUrl, manualRegistrationCode) },
                 enabled = !liveRegistrationBusy && manualLiveBaseUrl.isNotBlank() && manualRegistrationCode.isNotBlank(),
             ) {
