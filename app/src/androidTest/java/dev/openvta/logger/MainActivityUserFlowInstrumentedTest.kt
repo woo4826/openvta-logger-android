@@ -11,8 +11,10 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.rule.GrantPermissionRule
+import dev.openvta.logger.live.LiveDeviceCommand
 import dev.openvta.logger.recording.RecordingForegroundService
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -55,6 +57,44 @@ class MainActivityUserFlowInstrumentedTest {
             .listSessions()
             .firstOrNull { it.id !in before }
         val session = checkNotNull(created) { "UI Start/Stop should create a new session" }
+
+        assertTrue("VTA file should exist", session.vtaFile.isFile)
+        assertTrue("VTA session should be closed with footer", session.vtaFile.readText().contains("%% End"))
+    }
+
+    @Test
+    fun remoteCommandsStartAndStopRecordingWithoutCrash() {
+        val app = ApplicationProvider.getApplicationContext<OpenVtaLoggerApp>()
+        val before = app.container.recordingRepository.listSessions().map { it.id }.toSet()
+
+        val start = app.container.liveUpstreamManager.execute(
+            LiveDeviceCommand(
+                id = "remote-start-id",
+                commandId = "remote-start-command",
+                type = "recording.start",
+                recordingId = null,
+                payload = null,
+            ),
+        )
+        assertEquals("succeeded", start.status)
+        waitForRecordingState(app, expected = true)
+
+        val stop = app.container.liveUpstreamManager.execute(
+            LiveDeviceCommand(
+                id = "remote-stop-id",
+                commandId = "remote-stop-command",
+                type = "recording.stop",
+                recordingId = null,
+                payload = null,
+            ),
+        )
+        assertEquals("succeeded", stop.status)
+        waitForRecordingState(app, expected = false)
+
+        val created = app.container.recordingRepository
+            .listSessions()
+            .firstOrNull { it.id !in before }
+        val session = checkNotNull(created) { "Remote Start/Stop should create a new session" }
 
         assertTrue("VTA file should exist", session.vtaFile.isFile)
         assertTrue("VTA session should be closed with footer", session.vtaFile.readText().contains("%% End"))

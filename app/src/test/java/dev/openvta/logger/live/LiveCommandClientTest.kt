@@ -33,4 +33,26 @@ class LiveCommandClientTest {
         assertEquals("succeeded", commandResult.getString("status"))
         assertNotNull(commandResult.getJSONObject("result"))
     }
+
+    @Test
+    fun sendsFailedResultWhenExecutorThrows() {
+        val sent = mutableListOf<String>()
+        val result = LiveCommandClient().handleServerMessage(
+            raw = """{"event":"command.created","payload":{"id":"id_02","commandId":"cmd_02","type":"recording.start"}}""",
+            send = { sent += it },
+            executor = object : LiveCommandExecutor {
+                override fun execute(command: LiveDeviceCommand): LiveCommandResult {
+                    throw IllegalStateException("startForegroundService() not allowed")
+                }
+            },
+        )
+
+        assertEquals("failed", result?.status)
+        assertEquals(2, sent.size)
+        val commandResult = JSONObject(sent[1])
+        assertEquals("command.result", commandResult.getString("type"))
+        assertEquals("cmd_02", commandResult.getString("commandId"))
+        assertEquals("failed", commandResult.getString("status"))
+        assertEquals("startForegroundService() not allowed", commandResult.getJSONObject("result").getString("error"))
+    }
 }
