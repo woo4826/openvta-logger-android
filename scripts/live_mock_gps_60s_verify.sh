@@ -219,17 +219,36 @@ set_test_location() {
   local time_millis
   time_millis="$(($(date +%s) * 1000))"
 
-  if ! adb_device shell cmd location providers set-test-provider-location "$GPS_PROVIDER" \
+  if adb_device shell cmd location providers set-test-provider-location "$GPS_PROVIDER" \
     --location "$lat,$lon" \
     --accuracy "$accuracy" \
     --altitude "$altitude" \
     --speed "$speed" \
     --bearing "$bearing" \
     --time "$time_millis" >/dev/null 2>&1; then
-    adb_device shell cmd location providers set-test-provider-location "$GPS_PROVIDER" \
-      --location "$lat,$lon" \
-      --accuracy "$accuracy" >/dev/null
+    return
   fi
+
+  if adb_device shell cmd location providers set-test-provider-location "$GPS_PROVIDER" \
+    --location "$lat,$lon" \
+    --accuracy "$accuracy" >/dev/null 2>&1; then
+    return
+  fi
+
+  prepare_gps_test_provider
+  if adb_device shell cmd location providers set-test-provider-location "$GPS_PROVIDER" \
+    --location "$lat,$lon" \
+    --accuracy "$accuracy" \
+    --altitude "$altitude" \
+    --speed "$speed" \
+    --bearing "$bearing" \
+    --time "$time_millis" >/dev/null 2>&1; then
+    return
+  fi
+
+  adb_device shell cmd location providers set-test-provider-location "$GPS_PROVIDER" \
+    --location "$lat,$lon" \
+    --accuracy "$accuracy" >/dev/null
 }
 
 route_point() {
