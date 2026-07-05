@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -90,6 +91,7 @@ import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.GpsSample
 import dev.openvta.logger.domain.ImuEnhancementPreset
 import dev.openvta.logger.domain.ImuEnhancementPresets
+import dev.openvta.logger.domain.LiveConnectionState
 import dev.openvta.logger.domain.RecordingSession
 import dev.openvta.logger.domain.SessionVisualization
 import dev.openvta.logger.domain.UploadState
@@ -103,6 +105,7 @@ import dev.openvta.logger.ui.VisualizationCard
 import dev.openvta.logger.upload.UploadWorker
 import java.io.File
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -195,6 +198,7 @@ class MainActivity : ComponentActivity() {
             liveBaseUrl = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_BASE_URL) ?: current.liveBaseUrl,
             liveTenantId = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_TENANT_ID) ?: current.liveTenantId,
             liveDeviceId = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_DEVICE_ID) ?: current.liveDeviceId,
+            liveClientDeviceKey = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_CLIENT_DEVICE_KEY) ?: current.liveClientDeviceKey,
             liveMqttCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_MQTT_CREDENTIAL) ?: current.liveMqttCredential,
             liveWssCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_WSS_CREDENTIAL) ?: current.liveWssCredential,
             liveApiCredential = intent.getStringExtra(EXTRA_AUTOMATION_LIVE_API_CREDENTIAL) ?: current.liveApiCredential,
@@ -225,6 +229,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AUTOMATION_LIVE_BASE_URL = "debugLiveBaseUrl"
         const val EXTRA_AUTOMATION_LIVE_TENANT_ID = "debugLiveTenantId"
         const val EXTRA_AUTOMATION_LIVE_DEVICE_ID = "debugLiveDeviceId"
+        const val EXTRA_AUTOMATION_LIVE_CLIENT_DEVICE_KEY = "debugLiveClientDeviceKey"
         const val EXTRA_AUTOMATION_LIVE_MQTT_CREDENTIAL = "debugLiveMqttCredential"
         const val EXTRA_AUTOMATION_LIVE_WSS_CREDENTIAL = "debugLiveWssCredential"
         const val EXTRA_AUTOMATION_LIVE_API_CREDENTIAL = "debugLiveApiCredential"
@@ -251,6 +256,7 @@ private fun OpenVtaLoggerAppScreen(
     val coroutineScope = rememberCoroutineScope()
     var busySessionId by remember { mutableStateOf<String?>(null) }
     var liveRegistrationBusy by remember { mutableStateOf(false) }
+    var livePendingCount by remember { mutableStateOf(app.container.liveUpstreamManager.pendingCount()) }
     val liveRegistrationClient = remember { LiveRegistrationClient() }
 
     fun applyLiveCredentialRotation(rawPayload: String) {
@@ -284,22 +290,28 @@ private fun OpenVtaLoggerAppScreen(
                         .filter { it.isNotBlank() }
                         .joinToString(" ")
                         .ifBlank { "Android device" }
-                    val result = withContext(Dispatchers.IO) {
-                        liveRegistrationClient.consumeToken(payload.baseUrl, payload.token, displayName, BuildConfig.VERSION_NAME)
+                    val updated = withContext(Dispatchers.IO) {
+                        val current = app.container.settingsRepository.load()
+                        val clientDeviceKey = current.liveClientDeviceKey.ifBlank { UUID.randomUUID().toString() }
+                        val result = liveRegistrationClient.consumeToken(
+                            payload.baseUrl,
+                            payload.token,
+                            displayName,
+                            BuildConfig.VERSION_NAME,
+                            clientDeviceKey,
+                        )
+                        current.copy(
+                            liveEnabled = true,
+                            liveBaseUrl = payload.baseUrl,
+                            liveTenantId = result.tenantId,
+                            liveDeviceId = result.deviceId,
+                            liveClientDeviceKey = clientDeviceKey,
+                            liveMqttCredential = result.mqttCredential,
+                            liveWssCredential = result.wssCredential,
+                            liveApiCredential = result.apiCredential,
+                        ).also(app.container.settingsRepository::save)
                     }
-                    val updated = settings.copy(
-                        liveEnabled = true,
-                        liveBaseUrl = payload.baseUrl,
-                        liveTenantId = result.tenantId,
-                        liveDeviceId = result.deviceId,
-                        liveMqttCredential = result.mqttCredential,
-                        liveWssCredential = result.wssCredential,
-                        liveApiCredential = result.apiCredential,
-                    )
                     onSettingsChange(updated)
-                    withContext(Dispatchers.IO) {
-                        app.container.settingsRepository.save(updated)
-                    }
                     app.container.liveUpstreamManager.refreshCommandConnection()
                     app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
                 } catch (exception: Exception) {
@@ -375,6 +387,9 @@ private fun OpenVtaLoggerAppScreen(
         }
     }
     LaunchedEffect(status.lastMessage) {
+        livePendingCount = withContext(Dispatchers.IO) {
+            app.container.liveUpstreamManager.pendingCount()
+        }
         val message = status.lastMessage
         if (message.startsWith("Upload ") || message.startsWith("ZIP ")) {
             sessions = withContext(Dispatchers.IO) {
@@ -399,6 +414,31 @@ private fun OpenVtaLoggerAppScreen(
     val stopRecording: () -> Unit = {
         context.startService(RecordingForegroundService.stopIntent(context))
     }
+    val reconnectLive: () -> Unit = {
+        app.container.liveUpstreamManager.refreshCommandConnection()
+        app.container.liveUpstreamManager.retryPending()
+        livePendingCount = app.container.liveUpstreamManager.pendingCount()
+        app.container.updateStatus { it.copy(lastMessage = "Live reconnect requested") }
+    }
+    val disconnectLive: () -> Unit = {
+        val updated = settings.copy(
+            liveEnabled = false,
+            liveTenantId = "",
+            liveDeviceId = "",
+            liveMqttCredential = "",
+            liveWssCredential = "",
+            liveApiCredential = "",
+        )
+        onSettingsChange(updated)
+        app.container.settingsRepository.save(updated)
+        app.container.liveUpstreamManager.disconnectCommandConnection()
+        app.container.updateStatus {
+            it.copy(
+                lastMessage = "Live disconnected by user",
+                liveConnectionState = LiveConnectionState.Disconnected,
+            )
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text(selectedTab.title) }) },
@@ -417,10 +457,22 @@ private fun OpenVtaLoggerAppScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        val contentModifier = Modifier
+        val contentModifier = Modifier.fillMaxSize()
+        Column(
+            modifier = Modifier
             .padding(padding)
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp)
-            .fillMaxSize()
+                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 96.dp)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            LiveStatusBanner(
+                settings = settings,
+                status = status,
+                pendingCount = livePendingCount,
+                onReconnect = reconnectLive,
+                onDisconnect = disconnectLive,
+            )
+            Box(Modifier.weight(1f).fillMaxWidth()) {
 
         when (selectedTab) {
             AppTab.Dashboard -> DashboardScreen(
@@ -540,12 +592,16 @@ private fun OpenVtaLoggerAppScreen(
                 },
                 onRegisterLiveCode = registerLiveFromCode,
                 onApplyLiveCredentialRotation = ::applyLiveCredentialRotation,
+                onReconnectLive = reconnectLive,
+                onDisconnectLive = disconnectLive,
                 onSave = {
                     app.container.settingsRepository.save(settings)
                     app.container.liveUpstreamManager.refreshCommandConnection()
                     app.container.updateStatus { it.copy(lastMessage = "Settings saved") }
                 },
             )
+        }
+            }
         }
     }
 }
@@ -595,6 +651,58 @@ private fun AppNavigationBar(
                 },
                 label = { Text(tab.title) },
             )
+        }
+    }
+}
+
+@Composable
+private fun LiveStatusBanner(
+    settings: AppSettings,
+    status: dev.openvta.logger.domain.RecordingStatus,
+    pendingCount: Int,
+    onReconnect: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    val paired = settings.liveDeviceId.isNotBlank()
+    val title = when {
+        !settings.liveEnabled -> "Live disabled"
+        !paired -> "Live not paired"
+        status.liveConnectionState == LiveConnectionState.Connected -> "Live connected"
+        status.liveConnectionState == LiveConnectionState.Connecting -> "Live connecting"
+        status.liveConnectionState == LiveConnectionState.Reconnecting -> "Live reconnecting"
+        else -> "Live ready"
+    }
+    val detail = buildList {
+        if (paired) add("Device ${settings.liveDeviceId.take(8)}")
+        if (pendingCount > 0) add("$pendingCount pending")
+        val transfer = status.liveLastTransferMessage.ifBlank { null }
+        if (transfer != null) add(transfer)
+    }.ifEmpty {
+        listOf(if (paired) "No pending payloads" else "Register with a 6 digit code in Settings")
+    }.joinToString(" | ")
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.labelLarge)
+                Text(detail, style = MaterialTheme.typography.labelSmall)
+            }
+            if (paired) {
+                TextButton(onClick = onReconnect) {
+                    Text("Reconnect")
+                }
+                TextButton(onClick = onDisconnect) {
+                    Text("Disconnect")
+                }
+            }
         }
     }
 }
@@ -721,6 +829,8 @@ private fun SettingsScreen(
     onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
     onApplyLiveCredentialRotation: (String) -> Unit,
+    onReconnectLive: () -> Unit,
+    onDisconnectLive: () -> Unit,
     onSave: () -> Unit,
 ) {
     var selectedSection by remember { mutableStateOf(SettingsSectionTab.General) }
@@ -750,6 +860,8 @@ private fun SettingsScreen(
                     onSelectLiveQrImage = onSelectLiveQrImage,
                     onRegisterLiveCode = onRegisterLiveCode,
                     onApplyLiveCredentialRotation = onApplyLiveCredentialRotation,
+                    onReconnectLive = onReconnectLive,
+                    onDisconnectLive = onDisconnectLive,
                 )
                 SettingsSectionTab.Ftp -> FtpSettingsCard(
                     settings = settings,
@@ -923,6 +1035,8 @@ private fun LiveSettingsCard(
     onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
     onApplyLiveCredentialRotation: (String) -> Unit,
+    onReconnectLive: () -> Unit,
+    onDisconnectLive: () -> Unit,
 ) {
     var manualLiveBaseUrl by remember(settings.liveBaseUrl) {
         mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
@@ -1036,6 +1150,22 @@ private fun LiveSettingsCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (settings.liveDeviceId.isNotBlank()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        modifier = Modifier.testTag("live-reconnect-button"),
+                        onClick = onReconnectLive,
+                    ) {
+                        Text("Reconnect")
+                    }
+                    TextButton(
+                        modifier = Modifier.testTag("live-disconnect-button"),
+                        onClick = onDisconnectLive,
+                    ) {
+                        Text("Disconnect")
+                    }
+                }
+            }
         }
     }
 }

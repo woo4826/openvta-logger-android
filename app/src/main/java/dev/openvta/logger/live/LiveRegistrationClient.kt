@@ -9,7 +9,7 @@ import java.net.URL
 import java.net.URLDecoder
 
 class LiveRegistrationClient {
-    fun consumeToken(baseUrl: String, token: String, displayName: String, appVersion: String): LiveRegistrationResult {
+    fun consumeToken(baseUrl: String, token: String, displayName: String, appVersion: String, clientDeviceKey: String): LiveRegistrationResult {
         val url = URL(baseUrl.trimEnd('/') + "/api/devices/registration/consume")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -23,6 +23,7 @@ class LiveRegistrationClient {
             .put("displayName", displayName)
             .put("appVersion", appVersion)
             .put("platform", "android")
+            .put("clientDeviceKey", clientDeviceKey)
             .toString()
         OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body) }
         val responseCode = connection.responseCode

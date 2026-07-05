@@ -22,6 +22,7 @@ class SettingsCodecTest {
             liveBaseUrl = "https://openvta-live.kro.kr",
             liveTenantId = "tenant_01",
             liveDeviceId = "device_01",
+            liveClientDeviceKey = "client-device-key-1",
             liveMqttCredential = "mqtt_secret",
             liveWssCredential = "wss_secret",
             liveApiCredential = "api_secret",

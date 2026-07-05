@@ -15,6 +15,25 @@ class LiveUpstreamManagerTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun refreshCommandConnectionClosesClientWhenLiveIsDisabled() {
+        var settings = liveSettings().copy(liveWssCredential = "wss_secret")
+        val commandClient = RecordingCommandClient()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = LiveOutboxRepository(temporaryFolder.root),
+            commandClient = commandClient,
+            executor = Executor { it.run() },
+        )
+
+        manager.refreshCommandConnection()
+        settings = settings.copy(liveEnabled = false)
+        manager.refreshCommandConnection()
+
+        assertEquals(1, commandClient.ensureConnectedCalls)
+        assertEquals(1, commandClient.closeCalls)
+    }
+
+    @Test
     fun flushPendingAcksDeliveredEntries() {
         val repository = LiveOutboxRepository(temporaryFolder.root)
         val settings = AppSettings(
@@ -378,4 +397,19 @@ class LiveUpstreamManagerTest {
         liveDeviceId = "device_01",
         liveApiCredential = "api_secret",
     )
+
+    private class RecordingCommandClient : LiveCommandClient() {
+        var ensureConnectedCalls = 0
+            private set
+        var closeCalls = 0
+            private set
+
+        override fun ensureConnected(settings: AppSettings, executor: LiveCommandExecutor) {
+            ensureConnectedCalls += 1
+        }
+
+        override fun close() {
+            closeCalls += 1
+        }
+    }
 }

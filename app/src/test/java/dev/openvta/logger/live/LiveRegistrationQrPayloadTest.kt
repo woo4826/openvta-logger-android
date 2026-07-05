@@ -25,6 +25,14 @@ class LiveRegistrationQrPayloadTest {
     }
 
     @Test
+    fun parsesPairingUrlQrWithExplicitLocalBaseUrl() {
+        val payload = LiveRegistrationQrPayload.parse("https://openvta-live.kro.kr/pair/654321?baseUrl=http%3A%2F%2F10.0.2.2%3A4000")
+
+        assertEquals("http://10.0.2.2:4000", payload.baseUrl)
+        assertEquals("654321", payload.token)
+    }
+
+    @Test
     fun parsesPlainCodeQrWithFallbackBaseUrl() {
         val payload = LiveRegistrationQrPayload.parse(" 456789 ", fallbackBaseUrl = "https://openvta-live.kro.kr")
 

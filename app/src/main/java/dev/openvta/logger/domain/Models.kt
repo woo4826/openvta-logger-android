@@ -16,10 +16,19 @@ data class AppSettings(
     val liveBaseUrl: String = "https://openvta-live.kro.kr",
     val liveTenantId: String = "",
     val liveDeviceId: String = "",
+    val liveClientDeviceKey: String = "",
     val liveMqttCredential: String = "",
     val liveWssCredential: String = "",
     val liveApiCredential: String = "",
 )
+
+enum class LiveConnectionState {
+    NotConfigured,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Disconnected,
+}
 
 enum class UploadState {
     NotQueued,
@@ -98,5 +107,8 @@ data class RecordingStatus(
     val distanceMeters: Double = 0.0,
     val lastGps: GpsSample? = null,
     val lastMessage: String = "Idle",
+    val liveConnectionState: LiveConnectionState = LiveConnectionState.NotConfigured,
+    val liveLastTransferAtMillis: Long? = null,
+    val liveLastTransferMessage: String = "",
     val liveTrace: VtaTrace = VtaTrace("Live recording", emptyList(), emptyList()),
 )

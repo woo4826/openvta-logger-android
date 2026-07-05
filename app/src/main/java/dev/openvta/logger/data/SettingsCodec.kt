@@ -22,6 +22,7 @@ object SettingsCodec {
         properties.setProperty("liveBaseUrl", settings.liveBaseUrl)
         properties.setProperty("liveTenantId", settings.liveTenantId)
         properties.setProperty("liveDeviceId", settings.liveDeviceId)
+        properties.setProperty("liveClientDeviceKey", settings.liveClientDeviceKey)
         properties.setProperty("liveMqttCredential", settings.liveMqttCredential)
         properties.setProperty("liveWssCredential", settings.liveWssCredential)
         properties.setProperty("liveApiCredential", settings.liveApiCredential)
@@ -48,6 +49,7 @@ object SettingsCodec {
             liveBaseUrl = properties.getProperty("liveBaseUrl", "https://openvta-live.kro.kr"),
             liveTenantId = properties.getProperty("liveTenantId", ""),
             liveDeviceId = properties.getProperty("liveDeviceId", ""),
+            liveClientDeviceKey = properties.getProperty("liveClientDeviceKey", ""),
             liveMqttCredential = properties.getProperty("liveMqttCredential", ""),
             liveWssCredential = properties.getProperty("liveWssCredential", ""),
             liveApiCredential = properties.getProperty("liveApiCredential", ""),

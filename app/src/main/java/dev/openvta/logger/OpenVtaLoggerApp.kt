@@ -11,6 +11,7 @@ import android.os.Bundle
 import androidx.core.content.ContextCompat
 import dev.openvta.logger.data.RecordingRepository
 import dev.openvta.logger.data.SecureSettingsRepository
+import dev.openvta.logger.domain.LiveConnectionState
 import dev.openvta.logger.domain.RecordingStatus
 import dev.openvta.logger.live.LiveCommandActionHandler
 import dev.openvta.logger.live.LiveCommandClient
@@ -79,6 +80,15 @@ class AppContainer(app: OpenVtaLoggerApp) {
         outboxRepository = liveOutboxRepository,
         commandClient = liveCommandClient,
         resolveRecordingSession = recordingRepository::loadSession,
+        onTransferStatus = { message ->
+            updateStatus {
+                it.copy(
+                    lastMessage = message,
+                    liveLastTransferAtMillis = System.currentTimeMillis(),
+                    liveLastTransferMessage = message,
+                )
+            }
+        },
         commandActionHandler = object : LiveCommandActionHandler {
             override fun startRecording(): LiveCommandResult {
                 if (status.value.isRecording) {
@@ -113,12 +123,19 @@ class AppContainer(app: OpenVtaLoggerApp) {
     }
 
     private fun handleLiveCommandConnectionEvent(event: LiveCommandConnectionEvent) {
+        val state = when (event) {
+            is LiveCommandConnectionEvent.Connecting -> if (event.retrying) LiveConnectionState.Reconnecting else LiveConnectionState.Connecting
+            is LiveCommandConnectionEvent.Connected -> LiveConnectionState.Connected
+            is LiveCommandConnectionEvent.Failed -> LiveConnectionState.Reconnecting
+            is LiveCommandConnectionEvent.Closed -> LiveConnectionState.Reconnecting
+        }
         val message = when (event) {
+            is LiveCommandConnectionEvent.Connecting -> if (event.retrying) "Live command channel reconnecting" else "Live command channel connecting"
             is LiveCommandConnectionEvent.Connected -> "Live command channel connected"
             is LiveCommandConnectionEvent.Failed -> "Live command channel failed: ${event.throwable.message ?: event.throwable::class.java.simpleName}"
             is LiveCommandConnectionEvent.Closed -> "Live command channel closed: ${event.code} ${event.reason}".trim()
         }
-        updateStatus { it.copy(lastMessage = message) }
+        updateStatus { it.copy(lastMessage = message, liveConnectionState = state) }
     }
 
     private fun registerLiveNetworkRetry(app: OpenVtaLoggerApp) {
@@ -127,6 +144,7 @@ class AppContainer(app: OpenVtaLoggerApp) {
             connectivityManager.registerDefaultNetworkCallback(
                 object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) {
+                        liveUpstreamManager.refreshCommandConnection()
                         liveUpstreamManager.retryPending()
                     }
                 },

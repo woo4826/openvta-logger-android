@@ -15,6 +15,7 @@ class LiveUpstreamManager(
     private val commandClient: LiveCommandClient = LiveCommandClient(),
     private val commandActionHandler: LiveCommandActionHandler = NoopLiveCommandActionHandler,
     private val resolveRecordingSession: (String) -> RecordingSession? = { null },
+    private val onTransferStatus: (String) -> Unit = {},
     private val executor: Executor = defaultExecutor(),
 ) : LiveCommandExecutor {
     constructor(
@@ -74,6 +75,12 @@ class LiveUpstreamManager(
                 acked += 1
             }
         }
+        if (acked > 0) {
+            val label = if (acked == 1) "payload" else "payloads"
+            onTransferStatus("Live sent $acked $label")
+        } else if (outboxRepository.listPending().isNotEmpty()) {
+            onTransferStatus("Live pending ${outboxRepository.listPending().size} payloads")
+        }
         return acked
     }
 
@@ -82,7 +89,15 @@ class LiveUpstreamManager(
 
     fun refreshCommandConnection() {
         val settings = loadSettings()
-        if (LiveProtocol.isConfigured(settings)) refreshCommandConnection(settings)
+        if (LiveProtocol.isConfigured(settings)) {
+            refreshCommandConnection(settings)
+        } else {
+            commandClient.close()
+        }
+    }
+
+    fun disconnectCommandConnection() {
+        commandClient.close()
     }
 
     fun retryPending() {
