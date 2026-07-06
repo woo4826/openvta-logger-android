@@ -58,6 +58,7 @@ class LivePairingInstrumentedTest {
         compose.activityRule.scenario.recreate()
         compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         compose.waitForIdle()
+        waitForActivityFocus()
         Intents.init()
     }
 
@@ -218,6 +219,7 @@ class LivePairingInstrumentedTest {
 
         compose.onNodeWithTag("live-scan-qr-button").performScrollTo()
         compose.onNodeWithTag("live-scan-qr-button").performClick()
+        waitForActivityFocus()
 
         val app = InstrumentationRegistry.getInstrumentation()
             .targetContext
@@ -238,6 +240,7 @@ class LivePairingInstrumentedTest {
 
         compose.onNodeWithTag("live-scan-qr-button").performScrollTo()
         compose.onNodeWithTag("live-scan-qr-button").performClick()
+        waitForActivityFocus()
         intended(
             allOf(
                 hasComponent(CaptureActivity::class.java.name),
@@ -258,12 +261,29 @@ class LivePairingInstrumentedTest {
 
         compose.onNodeWithTag("live-qr-image-button").performScrollTo()
         compose.onNodeWithTag("live-qr-image-button").performClick()
+        waitForActivityFocus()
         intended(allOf(hasAction(Intent.ACTION_GET_CONTENT), hasType("image/*")))
     }
 
     private fun navigateToLiveSettings() {
+        waitForActivityFocus()
         compose.onNodeWithText("Settings").performClick()
+        waitForActivityFocus()
         compose.onNodeWithTag("settings-section-live").performClick()
+    }
+
+    private fun waitForActivityFocus() {
+        compose.activityRule.scenario.onActivity { activity ->
+            activity.window.decorView.requestFocus()
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            var hasFocus = false
+            compose.activityRule.scenario.onActivity { activity ->
+                hasFocus = activity.window.decorView.hasWindowFocus()
+            }
+            hasFocus
+        }
+        compose.waitForIdle()
     }
 
     private fun waitForLiveApiCredential(app: OpenVtaLoggerApp, expected: String) {
