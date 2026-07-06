@@ -60,6 +60,7 @@ class LiveUpstreamManager(
         refreshCommandConnection(settings)
         var acked = 0
         for (entry in outboxRepository.listPending()) {
+            if (entry.status == LiveOutboxStatus.Sent) continue
             if (entry.isVtaMetadata() && entry.recordingId != allowVtaMetadataForRecordingId) continue
             outboxRepository.markSent(entry.id)
             val result = runCatching { syncClient.send(settings, entry) }.getOrDefault(LiveSyncResult.failed())
@@ -103,8 +104,11 @@ class LiveUpstreamManager(
         commandClient.close()
     }
 
-    fun retryPending() {
+    fun retryPending(retryAwaitingAck: Boolean = false) {
         executor.execute {
+            if (retryAwaitingAck) {
+                runCatching { outboxRepository.requeueAwaitingAck() }
+            }
             runCatching { flushPending() }
             runCatching { retryPendingVtaUploads() }
         }
@@ -225,6 +229,6 @@ private fun LiveOutboxEntry.isVtaMetadata(): Boolean = kind == "chunk-meta" || k
 private fun liveTransferBacklogMessage(summary: LiveOutboxSummary): String =
     when {
         summary.hasFailures -> "Live failed ${summary.failed} payloads; retry required"
-        summary.awaitingAckCount > 0 -> "Live awaiting server ack for ${summary.awaitingAckCount} payloads"
+        summary.awaitingAckCount > 0 -> "Live awaiting server ack for ${summary.awaitingAckCount} payloads; retry Live if the web view stays stale"
         else -> "Live pending ${summary.pending} payloads"
     }

@@ -106,6 +106,15 @@ class RoomLiveOutboxRepository(context: Context) : LiveOutboxStore {
         return requeued
     }
 
+    override fun requeueAwaitingAck(): Int {
+        val updatedAtMillis = System.currentTimeMillis()
+        return dao.requeueStatus(
+            fromStatus = LiveOutboxStatus.Sent.name,
+            toStatus = LiveOutboxStatus.Pending.name,
+            updatedAtMillis = updatedAtMillis,
+        )
+    }
+
     private fun updateStatus(id: String, status: LiveOutboxStatus) {
         dao.updateStatus(id, status.name, System.currentTimeMillis())
     }
@@ -146,6 +155,9 @@ interface LiveOutboxDao {
 
     @Query("UPDATE live_outbox SET status = :status, updatedAtMillis = :updatedAtMillis WHERE id = :id")
     fun updateStatus(id: String, status: String, updatedAtMillis: Long)
+
+    @Query("UPDATE live_outbox SET status = :toStatus, updatedAtMillis = :updatedAtMillis WHERE status = :fromStatus")
+    fun requeueStatus(fromStatus: String, toStatus: String, updatedAtMillis: Long): Int
 }
 
 @Database(entities = [LiveOutboxEntity::class], version = 1, exportSchema = false)

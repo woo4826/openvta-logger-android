@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
         }
         if (intent.getBooleanExtra(EXTRA_AUTOMATION_RETRY_LIVE_UPSTREAM, false)) {
             val app = application as OpenVtaLoggerApp
-            app.container.liveUpstreamManager.retryPending()
+            app.container.liveUpstreamManager.retryPending(retryAwaitingAck = true)
         }
         when {
             intent.getBooleanExtra(EXTRA_AUTOMATION_START, false) -> {
@@ -449,9 +449,9 @@ private fun OpenVtaLoggerAppScreen(
     }
     val reconnectLive: () -> Unit = {
         app.container.liveUpstreamManager.refreshCommandConnection()
-        app.container.liveUpstreamManager.retryPending()
+        app.container.liveUpstreamManager.retryPending(retryAwaitingAck = true)
         liveOutboxSummary = app.container.liveUpstreamManager.outboxSummary()
-        app.container.updateStatus { it.copy(lastMessage = "Live reconnect requested") }
+        app.container.updateStatus { it.copy(lastMessage = "Live retry requested") }
     }
     val disconnectLive: () -> Unit = {
         val updated = settings.copy(
@@ -713,7 +713,7 @@ private fun LiveStatusBanner(
         if (paired) add("Device ${settings.liveDeviceId.take(8)}")
         if (paired && !settings.liveEnabled) add("Telemetry and VTA upload paused")
         if (outboxSummary.pending > 0) add("${outboxSummary.pending} pending")
-        if (outboxSummary.sent > 0) add("${outboxSummary.sent} awaiting ack")
+        if (outboxSummary.sent > 0) add("${outboxSummary.sent} awaiting ack; Retry Live resends")
         if (outboxSummary.failed > 0) add("${outboxSummary.failed} failed")
         val transfer = status.liveLastTransferMessage.ifBlank { null }
         if (transfer != null) add(transfer)
@@ -737,7 +737,7 @@ private fun LiveStatusBanner(
             }
             if (paired) {
                 TextButton(onClick = onReconnect) {
-                    Text("Reconnect")
+                    Text(if (outboxSummary.activeCount > 0) "Retry Live" else "Reconnect")
                 }
                 TextButton(onClick = onDisconnect) {
                     Text("Disconnect")

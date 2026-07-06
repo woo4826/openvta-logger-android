@@ -21,6 +21,7 @@ interface LiveOutboxStore {
     fun markFailed(id: String)
     fun applyServerAck(ack: LiveServerAck): Int
     fun requeueMissingRanges(recordingId: String, ranges: List<LiveSequenceRange>): Int
+    fun requeueAwaitingAck(): Int
 }
 
 class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
@@ -88,6 +89,16 @@ class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
         var requeued = 0
         for (entry in listAllEntries()) {
             if (entry.recordingId != recordingId || !entry.overlapsAny(ranges) || entry.status == LiveOutboxStatus.Pending) continue
+            write(entry.copy(status = LiveOutboxStatus.Pending, updatedAtMillis = System.currentTimeMillis()))
+            requeued += 1
+        }
+        return requeued
+    }
+
+    override fun requeueAwaitingAck(): Int {
+        var requeued = 0
+        for (entry in listAllEntries()) {
+            if (entry.status != LiveOutboxStatus.Sent) continue
             write(entry.copy(status = LiveOutboxStatus.Pending, updatedAtMillis = System.currentTimeMillis()))
             requeued += 1
         }

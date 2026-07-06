@@ -92,6 +92,76 @@ class LiveUpstreamManagerTest {
     }
 
     @Test
+    fun automaticFlushDoesNotRepublishEntriesAwaitingServerAck() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings()
+        var sendCount = 0
+        val transferMessages = mutableListOf<String>()
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    sendCount += 1
+                    return LiveSyncResult.delivered()
+                }
+            },
+            onTransferStatus = transferMessages::add,
+            executor = Executor { it.run() },
+        )
+
+        repository.enqueue("telemetry", "recording_01", 1, 1, "sha256:abc", """{"stream":"telemetry"}""")
+
+        assertEquals(0, manager.flushPending())
+        assertEquals(0, manager.flushPending())
+
+        assertEquals(1, sendCount)
+        assertEquals(1, manager.pendingCount())
+        assertEquals(LiveOutboxStatus.Sent, repository.listPending().single().status)
+        assertEquals(
+            "Live awaiting server ack for 1 payloads; retry Live if the web view stays stale",
+            transferMessages.last(),
+        )
+    }
+
+    @Test
+    fun explicitRetryRequeuesAndRepublishesEntriesAwaitingServerAck() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val settings = liveSettings()
+        var sendCount = 0
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            syncClient = object : LiveSyncClient {
+                override fun send(settings: AppSettings, entry: LiveOutboxEntry): LiveSyncResult {
+                    sendCount += 1
+                    return if (sendCount == 1) {
+                        LiveSyncResult.delivered()
+                    } else {
+                        LiveSyncResult.delivered(
+                            LiveServerAck(
+                                deviceId = settings.liveDeviceId,
+                                recordingId = entry.recordingId,
+                                ackedRanges = listOf(LiveSequenceRange(entry.seqStart, entry.seqEnd)),
+                                acceptedPayloads = listOf(LiveAcknowledgedPayload(LiveSequenceRange(entry.seqStart, entry.seqEnd), entry.payloadHash)),
+                            ),
+                        )
+                    }
+                }
+            },
+            executor = Executor { it.run() },
+        )
+
+        repository.enqueue("telemetry", "recording_01", 1, 1, "sha256:abc", """{"stream":"telemetry"}""")
+
+        assertEquals(0, manager.flushPending())
+        manager.retryPending(retryAwaitingAck = true)
+
+        assertEquals(2, sendCount)
+        assertEquals(0, manager.pendingCount())
+    }
+
+    @Test
     fun flushPendingAppliesServerAckForMatchingRangeAndHash() {
         val repository = LiveOutboxRepository(temporaryFolder.root)
         val settings = liveSettings()
