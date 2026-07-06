@@ -55,7 +55,23 @@ class RoomLiveOutboxRepository(context: Context) : LiveOutboxStore {
             ),
         ).map { it.toEntry() }.sortedWith(liveOutboxEntryComparator)
 
-    override fun summary(): LiveOutboxSummary = LiveOutboxSummary.from(dao.listAll().map { it.toEntry() })
+    override fun summary(): LiveOutboxSummary {
+        var pending = 0
+        var sent = 0
+        var failed = 0
+        var acked = 0
+        for (entry in dao.countByStatus()) {
+            val count = entry.count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            when (runCatching { LiveOutboxStatus.valueOf(entry.status) }.getOrNull()) {
+                LiveOutboxStatus.Pending -> pending += count
+                LiveOutboxStatus.Sent -> sent += count
+                LiveOutboxStatus.Failed -> failed += count
+                LiveOutboxStatus.Acked -> acked += count
+                null -> pending += count
+            }
+        }
+        return LiveOutboxSummary(pending = pending, sent = sent, failed = failed, acked = acked)
+    }
 
     override fun markSent(id: String) {
         updateStatus(id, LiveOutboxStatus.Sent)
@@ -109,6 +125,11 @@ data class LiveOutboxEntity(
     val updatedAtMillis: Long,
 )
 
+data class LiveOutboxStatusCount(
+    val status: String,
+    val count: Long,
+)
+
 @Dao
 interface LiveOutboxDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -119,6 +140,9 @@ interface LiveOutboxDao {
 
     @Query("SELECT * FROM live_outbox ORDER BY createdAtMillis ASC")
     fun listAll(): List<LiveOutboxEntity>
+
+    @Query("SELECT status, COUNT(*) AS count FROM live_outbox GROUP BY status")
+    fun countByStatus(): List<LiveOutboxStatusCount>
 
     @Query("UPDATE live_outbox SET status = :status, updatedAtMillis = :updatedAtMillis WHERE id = :id")
     fun updateStatus(id: String, status: String, updatedAtMillis: Long)

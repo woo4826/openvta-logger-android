@@ -106,6 +106,21 @@ adb_device() {
   "$ADB" -s "$SERIAL" "$@"
 }
 
+require_emulator_device() {
+  if [[ "${ALLOW_PHYSICAL_DEVICE:-0}" == "1" ]]; then
+    return
+  fi
+  local is_qemu
+  is_qemu="$(adb_device shell getprop ro.kernel.qemu | tr -d '\r[:space:]')"
+  if [[ "$is_qemu" != "1" ]]; then
+    echo "Refusing to run emulator QA against physical device: $SERIAL" >&2
+    echo "Start an emulator, set ANDROID_SERIAL to an emulator, or set ALLOW_PHYSICAL_DEVICE=1 intentionally." >&2
+    exit 1
+  fi
+}
+
+require_emulator_device
+
 force_device_network_offline() {
   printf "Forcing emulator network offline for Live backlog capture.\n"
   NETWORK_FORCED_OFFLINE=1

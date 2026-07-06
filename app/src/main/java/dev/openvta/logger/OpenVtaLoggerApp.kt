@@ -104,6 +104,9 @@ class AppContainer(app: OpenVtaLoggerApp) {
             }
 
             override fun stopRecording(): LiveCommandResult {
+                if (!status.value.isRecording) {
+                    return LiveCommandResult.succeeded(mapOf("action" to "recording.stop", "alreadyIdle" to true))
+                }
                 return runCatching {
                     app.startService(RecordingForegroundService.stopIntent(app))
                     LiveCommandResult.succeeded(mapOf("action" to "recording.stop"))

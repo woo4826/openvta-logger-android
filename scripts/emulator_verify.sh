@@ -323,10 +323,44 @@ assert_no_runtime_crash() {
   rm -f "$log_file"
 }
 
+resolve_serial() {
+  if [[ -n "${ANDROID_SERIAL:-}" ]]; then
+    printf "%s\n" "$ANDROID_SERIAL"
+    return
+  fi
+
+  local devices
+  devices=($("$ADB" devices | awk 'NR > 1 && $2 == "device" { print $1 }'))
+  if [[ "${#devices[@]}" -ne 1 ]]; then
+    echo "Set ANDROID_SERIAL when zero or multiple adb devices are connected." >&2
+    "$ADB" devices >&2
+    exit 1
+  fi
+  printf "%s\n" "${devices[0]}"
+}
+
+require_emulator_device() {
+  if [[ "${ALLOW_PHYSICAL_DEVICE:-0}" == "1" ]]; then
+    return
+  fi
+  local is_qemu
+  is_qemu="$("$ADB" -s "$ANDROID_SERIAL" shell getprop ro.kernel.qemu | tr -d '\r[:space:]')"
+  if [[ "$is_qemu" != "1" ]]; then
+    echo "Refusing to run emulator QA against physical device: $ANDROID_SERIAL" >&2
+    echo "Start an emulator, set ANDROID_SERIAL to an emulator, or set ALLOW_PHYSICAL_DEVICE=1 intentionally." >&2
+    exit 1
+  fi
+}
+
 if [[ ! -f "$APK" ]]; then
   echo "Missing $APK. Run ./gradlew assembleDebug first." >&2
   exit 1
 fi
+
+ANDROID_SERIAL="$(resolve_serial)"
+export ANDROID_SERIAL
+require_emulator_device
+printf "Using adb serial: %s\n" "$ANDROID_SERIAL"
 
 "$ADB" wait-for-device
 "$ADB" uninstall "$PACKAGE" >/dev/null 2>&1 || true

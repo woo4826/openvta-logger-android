@@ -259,6 +259,8 @@ private fun OpenVtaLoggerAppScreen(
     val coroutineScope = rememberCoroutineScope()
     var busySessionId by remember { mutableStateOf<String?>(null) }
     var liveRegistrationBusy by remember { mutableStateOf(false) }
+    var manualPairingError by rememberSaveable { mutableStateOf("") }
+    var rotationError by rememberSaveable { mutableStateOf("") }
     var liveOutboxSummary by remember { mutableStateOf(app.container.liveUpstreamManager.outboxSummary()) }
     val liveRegistrationClient = remember { LiveRegistrationClient() }
 
@@ -274,12 +276,15 @@ private fun OpenVtaLoggerAppScreen(
                 }
             }
                 .onSuccess { updated ->
+                    rotationError = ""
                     onSettingsChange(updated)
                     app.container.liveUpstreamManager.refreshCommandConnection()
                     app.container.updateStatus { it.copy(lastMessage = "Live credentials rotated") }
                 }
                 .onFailure { exception ->
-                    app.container.updateStatus { it.copy(lastMessage = "Live credential rotation failed: ${exception.message}") }
+                    val message = "Live credential rotation failed: ${exception.message ?: "invalid payload"}"
+                    rotationError = message
+                    app.container.updateStatus { it.copy(lastMessage = message) }
                 }
         }
     }
@@ -314,11 +319,16 @@ private fun OpenVtaLoggerAppScreen(
                             liveApiCredential = result.apiCredential,
                         ).also(app.container.settingsRepository::save)
                     }
+                    manualPairingError = ""
                     onSettingsChange(updated)
                     app.container.liveUpstreamManager.refreshCommandConnection()
                     app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
                 } catch (exception: Exception) {
-                    app.container.updateStatus { it.copy(lastMessage = "$sourceLabel registration failed: ${exception.message}") }
+                    val message = "$sourceLabel registration failed: ${exception.message ?: "unknown error"}"
+                    if (sourceLabel.contains("code", ignoreCase = true)) {
+                        manualPairingError = message
+                    }
+                    app.container.updateStatus { it.copy(lastMessage = message) }
                 } finally {
                     liveRegistrationBusy = false
                 }
@@ -330,7 +340,9 @@ private fun OpenVtaLoggerAppScreen(
         runCatching { LiveRegistrationQrPayload.fromManual(baseUrl, token) }
             .onSuccess { registerLivePayload(it, "Live code") }
             .onFailure { exception ->
-                app.container.updateStatus { it.copy(lastMessage = "Live code registration failed: ${exception.message}") }
+                val message = "Live code registration failed: ${exception.message ?: "invalid code"}"
+                manualPairingError = message
+                app.container.updateStatus { it.copy(lastMessage = message) }
             }
     }
 
@@ -394,6 +406,9 @@ private fun OpenVtaLoggerAppScreen(
             app.container.liveUpstreamManager.outboxSummary()
         }
         val message = status.lastMessage
+        if (message.shouldShowSnackbar()) {
+            snackbarHostState.showSnackbar(message)
+        }
         if (message.startsWith("Upload ") || message.startsWith("ZIP ")) {
             sessions = withContext(Dispatchers.IO) {
                 app.container.recordingRepository.listSessions()
@@ -588,6 +603,8 @@ private fun OpenVtaLoggerAppScreen(
                 settings = settings,
                 message = status.lastMessage,
                 liveRegistrationBusy = liveRegistrationBusy,
+                manualPairingError = manualPairingError,
+                rotationError = rotationError,
                 onSettingsChange = onSettingsChange,
                 onScanLiveQr = {
                     liveQrLauncher.launch(
@@ -603,6 +620,8 @@ private fun OpenVtaLoggerAppScreen(
                 },
                 onRegisterLiveCode = registerLiveFromCode,
                 onApplyLiveCredentialRotation = ::applyLiveCredentialRotation,
+                onClearManualPairingError = { manualPairingError = "" },
+                onClearRotationError = { rotationError = "" },
                 onReconnectLive = reconnectLive,
                 onDisconnectLive = disconnectLive,
                 onSave = {
@@ -689,7 +708,6 @@ private fun LiveStatusBanner(
         if (outboxSummary.pending > 0) add("${outboxSummary.pending} pending")
         if (outboxSummary.sent > 0) add("${outboxSummary.sent} awaiting ack")
         if (outboxSummary.failed > 0) add("${outboxSummary.failed} failed")
-        if (outboxSummary.activeCount == 0 && outboxSummary.acked > 0) add("${outboxSummary.acked} acked")
         val transfer = status.liveLastTransferMessage.ifBlank { null }
         if (transfer != null) add(transfer)
     }.ifEmpty {
@@ -839,11 +857,15 @@ private fun SettingsScreen(
     settings: AppSettings,
     message: String,
     liveRegistrationBusy: Boolean,
+    manualPairingError: String,
+    rotationError: String,
     onSettingsChange: (AppSettings) -> Unit,
     onScanLiveQr: () -> Unit,
     onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
     onApplyLiveCredentialRotation: (String) -> Unit,
+    onClearManualPairingError: () -> Unit,
+    onClearRotationError: () -> Unit,
     onReconnectLive: () -> Unit,
     onDisconnectLive: () -> Unit,
     onSave: () -> Unit,
@@ -870,11 +892,15 @@ private fun SettingsScreen(
                 SettingsSectionTab.Live -> LiveSettingsCard(
                     settings = settings,
                     liveRegistrationBusy = liveRegistrationBusy,
+                    manualPairingError = manualPairingError,
+                    rotationError = rotationError,
                     onSettingsChange = onSettingsChange,
                     onScanLiveQr = onScanLiveQr,
                     onSelectLiveQrImage = onSelectLiveQrImage,
                     onRegisterLiveCode = onRegisterLiveCode,
                     onApplyLiveCredentialRotation = onApplyLiveCredentialRotation,
+                    onClearManualPairingError = onClearManualPairingError,
+                    onClearRotationError = onClearRotationError,
                     onReconnectLive = onReconnectLive,
                     onDisconnectLive = onDisconnectLive,
                 )
@@ -973,6 +999,14 @@ private fun DashboardCard(
 
 private fun formatDashboardMeters(value: Double): String = String.format(Locale.US, "%.1f m", value)
 
+private fun String.shouldShowSnackbar(): Boolean {
+    val lower = lowercase(Locale.US)
+    return lower.contains("failed") ||
+        lower.contains("denied") ||
+        lower.contains("cancelled") ||
+        lower.contains("invalid")
+}
+
 @Composable
 private fun SettingsHeaderCard(
     selectedSection: SettingsSectionTab,
@@ -1056,11 +1090,15 @@ private fun GeneralSettingsCard(
 private fun LiveSettingsCard(
     settings: AppSettings,
     liveRegistrationBusy: Boolean,
+    manualPairingError: String,
+    rotationError: String,
     onSettingsChange: (AppSettings) -> Unit,
     onScanLiveQr: () -> Unit,
     onSelectLiveQrImage: () -> Unit,
     onRegisterLiveCode: (String, String) -> Unit,
     onApplyLiveCredentialRotation: (String) -> Unit,
+    onClearManualPairingError: () -> Unit,
+    onClearRotationError: () -> Unit,
     onReconnectLive: () -> Unit,
     onDisconnectLive: () -> Unit,
 ) {
@@ -1115,7 +1153,10 @@ private fun LiveSettingsCard(
             }
             OutlinedTextField(
                 value = manualLiveBaseUrl,
-                onValueChange = { manualLiveBaseUrl = it },
+                onValueChange = {
+                    manualLiveBaseUrl = it
+                    if (manualPairingError.isNotBlank()) onClearManualPairingError()
+                },
                 label = { Text("Live server URL") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1124,12 +1165,21 @@ private fun LiveSettingsCard(
             )
             OutlinedTextField(
                 value = manualRegistrationCode,
-                onValueChange = { manualRegistrationCode = it },
+                onValueChange = {
+                    manualRegistrationCode = it
+                    if (manualPairingError.isNotBlank()) onClearManualPairingError()
+                },
                 label = { Text("6 digit pairing code") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("live-registration-code-field"),
                 singleLine = true,
+                isError = manualPairingError.isNotBlank(),
+                supportingText = {
+                    if (manualPairingError.isNotBlank()) {
+                        Text(manualPairingError)
+                    }
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             Button(
@@ -1152,19 +1202,27 @@ private fun LiveSettingsCard(
             )
             OutlinedTextField(
                 value = rotationPayload,
-                onValueChange = { rotationPayload = it },
+                onValueChange = {
+                    rotationPayload = it
+                    if (rotationError.isNotBlank()) onClearRotationError()
+                },
                 label = { Text("Rotation payload") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("live-credential-rotation-payload-field"),
                 minLines = 3,
                 maxLines = 6,
+                isError = rotationError.isNotBlank(),
+                supportingText = {
+                    if (rotationError.isNotBlank()) {
+                        Text(rotationError)
+                    }
+                },
             )
             Button(
                 modifier = Modifier.testTag("live-apply-credential-rotation-button"),
                 onClick = {
                     onApplyLiveCredentialRotation(rotationPayload)
-                    rotationPayload = ""
                 },
                 enabled = rotationPayload.isNotBlank(),
             ) {
