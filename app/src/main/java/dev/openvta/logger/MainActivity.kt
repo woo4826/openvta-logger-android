@@ -69,6 +69,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,6 +99,7 @@ import dev.openvta.logger.domain.UploadState
 import dev.openvta.logger.domain.VtaLogParser
 import dev.openvta.logger.domain.VtaTraceEnhancer
 import dev.openvta.logger.live.LiveCredentialRotationPayload
+import dev.openvta.logger.live.LiveOutboxSummary
 import dev.openvta.logger.live.LiveRegistrationClient
 import dev.openvta.logger.live.LiveRegistrationQrPayload
 import dev.openvta.logger.recording.RecordingForegroundService
@@ -107,6 +109,7 @@ import java.io.File
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -246,7 +249,7 @@ private fun OpenVtaLoggerAppScreen(
     val app = context.applicationContext as OpenVtaLoggerApp
     val status by app.container.status.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
+    var selectedTab by rememberSaveable { mutableStateOf(AppTab.Dashboard) }
     var sessions by remember {
         mutableStateOf(app.container.recordingRepository.listSessions(), neverEqualPolicy())
     }
@@ -256,7 +259,7 @@ private fun OpenVtaLoggerAppScreen(
     val coroutineScope = rememberCoroutineScope()
     var busySessionId by remember { mutableStateOf<String?>(null) }
     var liveRegistrationBusy by remember { mutableStateOf(false) }
-    var livePendingCount by remember { mutableStateOf(app.container.liveUpstreamManager.pendingCount()) }
+    var liveOutboxSummary by remember { mutableStateOf(app.container.liveUpstreamManager.outboxSummary()) }
     val liveRegistrationClient = remember { LiveRegistrationClient() }
 
     fun applyLiveCredentialRotation(rawPayload: String) {
@@ -387,14 +390,22 @@ private fun OpenVtaLoggerAppScreen(
         }
     }
     LaunchedEffect(status.lastMessage) {
-        livePendingCount = withContext(Dispatchers.IO) {
-            app.container.liveUpstreamManager.pendingCount()
+        liveOutboxSummary = withContext(Dispatchers.IO) {
+            app.container.liveUpstreamManager.outboxSummary()
         }
         val message = status.lastMessage
         if (message.startsWith("Upload ") || message.startsWith("ZIP ")) {
             sessions = withContext(Dispatchers.IO) {
                 app.container.recordingRepository.listSessions()
             }
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            liveOutboxSummary = withContext(Dispatchers.IO) {
+                app.container.liveUpstreamManager.outboxSummary()
+            }
+            delay(2_000)
         }
     }
 
@@ -417,7 +428,7 @@ private fun OpenVtaLoggerAppScreen(
     val reconnectLive: () -> Unit = {
         app.container.liveUpstreamManager.refreshCommandConnection()
         app.container.liveUpstreamManager.retryPending()
-        livePendingCount = app.container.liveUpstreamManager.pendingCount()
+        liveOutboxSummary = app.container.liveUpstreamManager.outboxSummary()
         app.container.updateStatus { it.copy(lastMessage = "Live reconnect requested") }
     }
     val disconnectLive: () -> Unit = {
@@ -468,7 +479,7 @@ private fun OpenVtaLoggerAppScreen(
             LiveStatusBanner(
                 settings = settings,
                 status = status,
-                pendingCount = livePendingCount,
+                outboxSummary = liveOutboxSummary,
                 onReconnect = reconnectLive,
                 onDisconnect = disconnectLive,
             )
@@ -659,14 +670,14 @@ private fun AppNavigationBar(
 private fun LiveStatusBanner(
     settings: AppSettings,
     status: dev.openvta.logger.domain.RecordingStatus,
-    pendingCount: Int,
+    outboxSummary: LiveOutboxSummary,
     onReconnect: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     val paired = settings.liveDeviceId.isNotBlank()
     val title = when {
-        !settings.liveEnabled -> "Live disabled"
         !paired -> "Live not paired"
+        !settings.liveEnabled -> "Live paired, upstream disabled"
         status.liveConnectionState == LiveConnectionState.Connected -> "Live connected"
         status.liveConnectionState == LiveConnectionState.Connecting -> "Live connecting"
         status.liveConnectionState == LiveConnectionState.Reconnecting -> "Live reconnecting"
@@ -674,7 +685,11 @@ private fun LiveStatusBanner(
     }
     val detail = buildList {
         if (paired) add("Device ${settings.liveDeviceId.take(8)}")
-        if (pendingCount > 0) add("$pendingCount pending")
+        if (paired && !settings.liveEnabled) add("Telemetry and VTA upload paused")
+        if (outboxSummary.pending > 0) add("${outboxSummary.pending} pending")
+        if (outboxSummary.sent > 0) add("${outboxSummary.sent} awaiting ack")
+        if (outboxSummary.failed > 0) add("${outboxSummary.failed} failed")
+        if (outboxSummary.activeCount == 0 && outboxSummary.acked > 0) add("${outboxSummary.acked} acked")
         val transfer = status.liveLastTransferMessage.ifBlank { null }
         if (transfer != null) add(transfer)
     }.ifEmpty {
@@ -833,7 +848,7 @@ private fun SettingsScreen(
     onDisconnectLive: () -> Unit,
     onSave: () -> Unit,
 ) {
-    var selectedSection by remember { mutableStateOf(SettingsSectionTab.General) }
+    var selectedSection by rememberSaveable { mutableStateOf(SettingsSectionTab.General) }
     LazyColumn(
         modifier = modifier.testTag("settings-list"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -924,18 +939,29 @@ private fun DashboardCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onStart, enabled = !isRecording) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onStart,
+                    enabled = !isRecording,
+                ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Start")
                 }
-                Button(onClick = onStop, enabled = isRecording) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onStop,
+                    enabled = isRecording,
+                ) {
                     Icon(Icons.Default.Stop, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Stop")
                 }
-                TextButton(onClick = onOpenLive) {
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenLive,
+                ) {
                     Icon(Icons.Default.Map, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text("Live")
@@ -1038,11 +1064,11 @@ private fun LiveSettingsCard(
     onReconnectLive: () -> Unit,
     onDisconnectLive: () -> Unit,
 ) {
-    var manualLiveBaseUrl by remember(settings.liveBaseUrl) {
+    var manualLiveBaseUrl by rememberSaveable(settings.liveBaseUrl) {
         mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
     }
-    var manualRegistrationCode by remember { mutableStateOf("") }
-    var rotationPayload by remember { mutableStateOf("") }
+    var manualRegistrationCode by rememberSaveable { mutableStateOf("") }
+    var rotationPayload by rememberSaveable { mutableStateOf("") }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("OpenVTA Live", style = MaterialTheme.typography.titleMedium)
@@ -1063,9 +1089,11 @@ private fun LiveSettingsCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    modifier = Modifier.testTag("live-scan-qr-button"),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("live-scan-qr-button"),
                     onClick = onScanLiveQr,
                     enabled = !liveRegistrationBusy,
                 ) {
@@ -1074,7 +1102,9 @@ private fun LiveSettingsCard(
                     Text(if (liveRegistrationBusy) "Registering" else "Scan QR")
                 }
                 Button(
-                    modifier = Modifier.testTag("live-qr-image-button"),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("live-qr-image-button"),
                     onClick = onSelectLiveQrImage,
                     enabled = !liveRegistrationBusy,
                 ) {
@@ -1103,7 +1133,9 @@ private fun LiveSettingsCard(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             Button(
-                modifier = Modifier.testTag("live-register-code-button"),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("live-register-code-button"),
                 onClick = { onRegisterLiveCode(manualLiveBaseUrl, manualRegistrationCode) },
                 enabled = !liveRegistrationBusy && manualLiveBaseUrl.isNotBlank() && manualRegistrationCode.isNotBlank(),
             ) {
@@ -1144,6 +1176,8 @@ private fun LiveSettingsCard(
             Text(
                 if (settings.liveDeviceId.isBlank()) {
                     "Not connected. Generate a device registration code in OpenVTA Live user web."
+                } else if (!settings.liveEnabled) {
+                    "Paired to ${settings.liveBaseUrl} as ${settings.liveDeviceId.take(8)}..., but upstream is disabled."
                 } else {
                     "Connected to ${settings.liveBaseUrl} as ${settings.liveDeviceId.take(8)}..."
                 },
@@ -1151,15 +1185,19 @@ private fun LiveSettingsCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (settings.liveDeviceId.isNotBlank()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        modifier = Modifier.testTag("live-reconnect-button"),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("live-reconnect-button"),
                         onClick = onReconnectLive,
                     ) {
                         Text("Reconnect")
                     }
                     TextButton(
-                        modifier = Modifier.testTag("live-disconnect-button"),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("live-disconnect-button"),
                         onClick = onDisconnectLive,
                     ) {
                         Text("Disconnect")
@@ -1287,34 +1325,50 @@ private fun SessionCard(
                 Text("Working...", color = MaterialTheme.colorScheme.primary)
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onView, enabled = session.vtaFile.isFile && !isBusy) {
-                        Icon(Icons.Default.Visibility, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("View")
-                    }
-                    TextButton(onClick = onZip, enabled = session.vtaFile.isFile && !isBusy) {
-                        Icon(Icons.Default.Archive, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Zip")
-                    }
-                    TextButton(onClick = onUpload, enabled = session.vtaFile.isFile && !isBusy) {
-                        Icon(Icons.Default.CloudUpload, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Upload")
-                    }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onView,
+                    enabled = session.vtaFile.isFile && !isBusy,
+                ) {
+                    Icon(Icons.Default.Visibility, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("View")
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onShareVta, enabled = session.vtaFile.isFile && !isBusy) {
-                        Icon(Icons.Default.Share, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Share VTA")
-                    }
-                    TextButton(onClick = onShareZip, enabled = session.zipFile.isFile && !isBusy) {
-                        Icon(Icons.Default.Share, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Share ZIP")
-                    }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onZip,
+                    enabled = session.vtaFile.isFile && !isBusy,
+                ) {
+                    Icon(Icons.Default.Archive, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Zip")
+                }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onUpload,
+                    enabled = session.vtaFile.isFile && !isBusy,
+                ) {
+                    Icon(Icons.Default.CloudUpload, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Upload")
+                }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onShareVta,
+                    enabled = session.vtaFile.isFile && !isBusy,
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Share VTA")
+                }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onShareZip,
+                    enabled = session.zipFile.isFile && !isBusy,
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Share ZIP")
                 }
             }
         }

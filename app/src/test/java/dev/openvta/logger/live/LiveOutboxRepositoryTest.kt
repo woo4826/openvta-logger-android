@@ -31,13 +31,16 @@ class LiveOutboxRepositoryTest {
 
         repository.markSent(entry.id)
         assertEquals(LiveOutboxStatus.Sent, repository.listPending().first().status)
+        assertEquals(LiveOutboxSummary(sent = 1), repository.summary())
 
         repository.markFailed(entry.id)
         assertEquals(LiveOutboxStatus.Failed, repository.listPending().first().status)
+        assertEquals(LiveOutboxSummary(failed = 1), repository.summary())
 
         repository.markAcked(entry.id)
 
         assertEquals(emptyList<LiveOutboxEntry>(), repository.listPending())
+        assertEquals(LiveOutboxSummary(acked = 1), repository.summary())
     }
 
     @Test

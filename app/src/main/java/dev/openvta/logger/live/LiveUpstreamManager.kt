@@ -78,8 +78,11 @@ class LiveUpstreamManager(
         if (acked > 0) {
             val label = if (acked == 1) "payload" else "payloads"
             onTransferStatus("Live sent $acked $label")
-        } else if (outboxRepository.listPending().isNotEmpty()) {
-            onTransferStatus("Live pending ${outboxRepository.listPending().size} payloads")
+        } else {
+            val summary = outboxRepository.summary()
+            if (summary.activeCount > 0) {
+                onTransferStatus(liveTransferBacklogMessage(summary))
+            }
         }
         return acked
     }
@@ -107,7 +110,9 @@ class LiveUpstreamManager(
         }
     }
 
-    fun pendingCount(): Int = outboxRepository.listPending().size
+    fun pendingCount(): Int = outboxSummary().activeCount
+
+    fun outboxSummary(): LiveOutboxSummary = outboxRepository.summary()
 
     override fun execute(command: LiveDeviceCommand): LiveCommandResult =
         when (command.type) {
@@ -216,3 +221,10 @@ class LiveUpstreamManager(
 }
 
 private fun LiveOutboxEntry.isVtaMetadata(): Boolean = kind == "chunk-meta" || kind == "manifest"
+
+private fun liveTransferBacklogMessage(summary: LiveOutboxSummary): String =
+    when {
+        summary.hasFailures -> "Live failed ${summary.failed} payloads; retry required"
+        summary.awaitingAckCount > 0 -> "Live awaiting server ack for ${summary.awaitingAckCount} payloads"
+        else -> "Live pending ${summary.pending} payloads"
+    }

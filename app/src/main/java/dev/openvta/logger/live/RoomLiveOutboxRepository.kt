@@ -55,6 +55,8 @@ class RoomLiveOutboxRepository(context: Context) : LiveOutboxStore {
             ),
         ).map { it.toEntry() }.sortedWith(liveOutboxEntryComparator)
 
+    override fun summary(): LiveOutboxSummary = LiveOutboxSummary.from(dao.listAll().map { it.toEntry() })
+
     override fun markSent(id: String) {
         updateStatus(id, LiveOutboxStatus.Sent)
     }

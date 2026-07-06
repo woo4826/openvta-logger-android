@@ -15,6 +15,7 @@ interface LiveOutboxStore {
     ): LiveOutboxEntry
 
     fun listPending(): List<LiveOutboxEntry>
+    fun summary(): LiveOutboxSummary
     fun markSent(id: String)
     fun markAcked(id: String)
     fun markFailed(id: String)
@@ -54,6 +55,8 @@ class LiveOutboxRepository(rootDir: File) : LiveOutboxStore {
             ?.filter { it.status == LiveOutboxStatus.Pending || it.status == LiveOutboxStatus.Sent || it.status == LiveOutboxStatus.Failed }
             ?.sortedWith(liveOutboxEntryComparator)
             ?: emptyList()
+
+    override fun summary(): LiveOutboxSummary = LiveOutboxSummary.from(listAllEntries())
 
     override fun markSent(id: String) {
         val entry = read(File(outboxDir, "$id.properties")) ?: return
@@ -151,6 +154,35 @@ enum class LiveOutboxStatus {
     Sent,
     Acked,
     Failed,
+}
+
+data class LiveOutboxSummary(
+    val pending: Int = 0,
+    val sent: Int = 0,
+    val failed: Int = 0,
+    val acked: Int = 0,
+) {
+    val activeCount: Int = pending + sent + failed
+    val hasFailures: Boolean = failed > 0
+    val awaitingAckCount: Int = sent
+
+    companion object {
+        fun from(entries: Iterable<LiveOutboxEntry>): LiveOutboxSummary {
+            var pending = 0
+            var sent = 0
+            var failed = 0
+            var acked = 0
+            for (entry in entries) {
+                when (entry.status) {
+                    LiveOutboxStatus.Pending -> pending += 1
+                    LiveOutboxStatus.Sent -> sent += 1
+                    LiveOutboxStatus.Failed -> failed += 1
+                    LiveOutboxStatus.Acked -> acked += 1
+                }
+            }
+            return LiveOutboxSummary(pending = pending, sent = sent, failed = failed, acked = acked)
+        }
+    }
 }
 
 internal val liveOutboxEntryComparator: Comparator<LiveOutboxEntry> =
