@@ -51,8 +51,32 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
 
 `RESET_APP_DATA=0` is the default to avoid deleting existing emulator app data. For parallel-agent validation, prefer a disposable emulator profile or set `RESET_APP_DATA=1` so stale settings cannot affect the run. This matters because current debug extras do not disable a previously configured Live upstream.
 
-## Current Live Gaps
+## Current Live Coverage
 
-- Remote command inbound is not implemented yet.
-- MQTT client behavior is not implemented yet.
-- HTTP upstream registration exists in the app, but it still needs fake-server and emulator validation before agents treat it as covered connected QA.
+- Opt-in OpenVTA Live pairing uses the six-digit registration flow. QR scan and
+  gallery QR import are convenience paths; direct code entry remains required
+  for QA.
+- HTTP is the primary upstream path for device status, recording metadata,
+  telemetry, and VTA bytes.
+- MQTT fallback subscribes to the per-device server ack topic and only clears
+  ranged telemetry outbox entries after a matching server ack is observed.
+- WSS command handling supports owner `recording.start` and `recording.stop`.
+  Foreground start/stop returns terminal success when permissions and state
+  allow it. Background remote start returns a foreground-required failure
+  instead of attempting an unsafe foreground-service launch.
+- Idle remote stop returns an explicit no-op success with idle state details.
+- Android CI run `28823163221` passed for commit `14b543c` with both
+  `build-and-unit-test` and `connected-emulator-test`. The connected job ran 13
+  instrumentation tests and `scripts/emulator_verify.sh`, producing 1 VTA file,
+  1 ZIP file, and 107 GPS rows.
+
+## Remaining Live QA Gaps
+
+- Physical production test-device credential rotation still needs to be
+  repeated before rotating real user devices.
+- Broad public distribution still needs release-owner sign-off, signed release
+  artifact hash evidence outside Git, clean-install smoke, and existing-user
+  upgrade QA for the final release candidate.
+- Production-like server tests remain out of scope unless the OpenVTA Live
+  production test policy explicitly allows them. Keep ordinary Android QA
+  local, emulator-based, or GitHub Actions-based by default.
