@@ -33,6 +33,7 @@ LIVE_SERVER_BASE_URL="${LIVE_SERVER_BASE_URL:-$LIVE_BASE_URL}"
 LIVE_SERVER_WAIT_SECONDS="${LIVE_SERVER_WAIT_SECONDS:-90}"
 LIVE_SESSION_COOKIE="${LIVE_SESSION_COOKIE:-}"
 NETWORK_RESTORE_WAIT_SECONDS="${NETWORK_RESTORE_WAIT_SECONDS:-8}"
+NEW_VTA_WAIT_SECONDS="${NEW_VTA_WAIT_SECONDS:-60}"
 
 SEOUL_LAT_MIN="${SEOUL_LAT_MIN:-37.50}"
 SEOUL_LAT_MAX="${SEOUL_LAT_MAX:-37.62}"
@@ -180,7 +181,8 @@ copy_remote_text_file() {
 wait_for_new_vta() {
   local previous="$1"
   local candidate
-  for _ in {1..30}; do
+  local deadline=$((SECONDS + NEW_VTA_WAIT_SECONDS))
+  while (( SECONDS < deadline )); do
     candidate="$(latest_remote_file Vta || true)"
     if [[ -n "$candidate" && "$candidate" != "$previous" ]]; then
       printf "%s\n" "$candidate"

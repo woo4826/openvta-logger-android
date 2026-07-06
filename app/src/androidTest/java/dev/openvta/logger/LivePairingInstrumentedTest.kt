@@ -14,7 +14,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.espresso.intent.Intents
-import androidx.test.espresso.intent.Intents.intended
 import androidx.test.espresso.intent.Intents.intending
 import androidx.test.espresso.intent.matcher.IntentMatchers.hasAction
 import androidx.test.espresso.intent.matcher.IntentMatchers.hasComponent
@@ -28,6 +27,7 @@ import com.journeyapps.barcodescanner.CaptureActivity
 import dev.openvta.logger.domain.AppSettings
 import dev.openvta.logger.domain.RecordingStatus
 import org.hamcrest.CoreMatchers.allOf
+import org.hamcrest.Matcher
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -58,7 +58,6 @@ class LivePairingInstrumentedTest {
         compose.activityRule.scenario.recreate()
         compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         compose.waitForIdle()
-        waitForActivityFocus()
         Intents.init()
     }
 
@@ -219,7 +218,6 @@ class LivePairingInstrumentedTest {
 
         compose.onNodeWithTag("live-scan-qr-button").performScrollTo()
         compose.onNodeWithTag("live-scan-qr-button").performClick()
-        waitForActivityFocus()
 
         val app = InstrumentationRegistry.getInstrumentation()
             .targetContext
@@ -240,8 +238,7 @@ class LivePairingInstrumentedTest {
 
         compose.onNodeWithTag("live-scan-qr-button").performScrollTo()
         compose.onNodeWithTag("live-scan-qr-button").performClick()
-        waitForActivityFocus()
-        intended(
+        assertRecordedIntent(
             allOf(
                 hasComponent(CaptureActivity::class.java.name),
                 hasAction("com.google.zxing.client.android.SCAN"),
@@ -261,29 +258,26 @@ class LivePairingInstrumentedTest {
 
         compose.onNodeWithTag("live-qr-image-button").performScrollTo()
         compose.onNodeWithTag("live-qr-image-button").performClick()
-        waitForActivityFocus()
-        intended(allOf(hasAction(Intent.ACTION_GET_CONTENT), hasType("image/*")))
+        assertRecordedIntent(allOf(hasAction(Intent.ACTION_GET_CONTENT), hasType("image/*")))
     }
 
     private fun navigateToLiveSettings() {
-        waitForActivityFocus()
         compose.onNodeWithText("Settings").performClick()
-        waitForActivityFocus()
         compose.onNodeWithTag("settings-section-live").performClick()
     }
 
-    private fun waitForActivityFocus() {
-        compose.activityRule.scenario.onActivity { activity ->
-            activity.window.decorView.requestFocus()
+    private fun assertRecordedIntent(matcher: Matcher<Intent>) {
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        var recorded = Intents.getIntents()
+        while (SystemClock.elapsedRealtime() < deadline) {
+            recorded = Intents.getIntents()
+            if (recorded.any { matcher.matches(it) }) return
+            Thread.sleep(100)
         }
-        compose.waitUntil(timeoutMillis = 5_000) {
-            var hasFocus = false
-            compose.activityRule.scenario.onActivity { activity ->
-                hasFocus = activity.window.decorView.hasWindowFocus()
-            }
-            hasFocus
+        val summary = recorded.joinToString(separator = "\n") { intent ->
+            "action=${intent.action} component=${intent.component} type=${intent.type} extras=${intent.extras}"
         }
-        compose.waitForIdle()
+        error("Expected recorded intent matching $matcher, but saw:\n$summary")
     }
 
     private fun waitForLiveApiCredential(app: OpenVtaLoggerApp, expected: String) {

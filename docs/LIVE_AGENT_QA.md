@@ -35,6 +35,7 @@ ANDROID_SERIAL=emulator-5554 ./scripts/live_mock_gps_60s_verify.sh
 APK=/path/to/app-debug.apk ./scripts/live_mock_gps_60s_verify.sh
 OUT_DIR=/tmp/openvta-live-agent-qa ./scripts/live_mock_gps_60s_verify.sh
 RESET_APP_DATA=1 ./scripts/live_mock_gps_60s_verify.sh
+NEW_VTA_WAIT_SECONDS=90 ./scripts/live_mock_gps_60s_verify.sh
 ```
 
 Artifacts are written under `/tmp/openvta-live-agent-qa/<UTC-run-id>/` by default:
@@ -105,6 +106,37 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
   `/tmp/openvta-live-agent-qa-20260707/20260706T230753Z/`.
 - The emulator was stopped with `adb -s emulator-5554 emu kill`; `adb devices`
   was empty after cleanup.
+
+2026-07-07 KST, CI focus-fix worktree:
+
+- Android CI run `28829542314` failed only in `connected-emulator-test`; the
+  `build-and-unit-test` job passed. The failure artifact showed seven
+  `LivePairingInstrumentedTest` failures in the shared `setUp()` path:
+  `ComposeTimeoutException` at `waitForActivityFocus()`, where the test waited
+  for `decorView.hasWindowFocus()` on the API 35 headless emulator.
+- `LivePairingInstrumentedTest` now verifies QR scanner and gallery handoff
+  intents from `Intents.getIntents()` instead of using `Intents.intended()`,
+  avoiding Espresso root-focus checks after intercepted external intents.
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+  --console=plain --stacktrace` passed locally.
+- `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
+  --console=plain --stacktrace` passed locally with 13 tests on
+  `Galaxy_A16_API34(AVD) - 14`.
+- `ANDROID_SERIAL=emulator-5554
+  SCREENSHOT_DIR=/tmp/openvta-android-ci-focus-fix-qa
+  ./scripts/emulator_verify.sh` passed with 1 VTA file, 1 ZIP file, 127 GPS
+  rows, and screen-off growth from 291589 to 390823 bytes. Screenshots were
+  written outside Git under `/tmp/openvta-android-ci-focus-fix-qa/`.
+- The 60-second QA script's new-VTA wait now defaults to 60 seconds and can be
+  overridden with `NEW_VTA_WAIT_SECONDS`. This covers slow cold starts after
+  `pm clear`.
+- `ANDROID_SERIAL=emulator-5554 RESET_APP_DATA=1
+  OUT_DIR=/tmp/openvta-live-agent-qa-focus-fix-cold
+  ./scripts/live_mock_gps_60s_verify.sh` passed after that timeout hardening.
+  Summary: `gpsRows=60`, `uniqueGpsPoints=60`, `routeSeconds=60`,
+  `liveEnabled=0`, and empty `crash_anr_markers.txt`. Artifacts were written
+  outside Git under
+  `/tmp/openvta-live-agent-qa-focus-fix-cold/20260706T232844Z/`.
 
 ## Remaining Live QA Gaps
 
