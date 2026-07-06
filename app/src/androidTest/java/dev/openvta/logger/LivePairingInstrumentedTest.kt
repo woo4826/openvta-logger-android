@@ -2,13 +2,17 @@ package dev.openvta.logger
 
 import android.app.Activity
 import android.content.Intent
+import android.os.SystemClock
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performTextClearance
-import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.espresso.intent.Intents
 import androidx.test.espresso.intent.Intents.intended
 import androidx.test.espresso.intent.Intents.intending
@@ -22,6 +26,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.lifecycle.Lifecycle
 import com.journeyapps.barcodescanner.CaptureActivity
 import dev.openvta.logger.domain.AppSettings
+import dev.openvta.logger.domain.RecordingStatus
 import org.hamcrest.CoreMatchers.allOf
 import org.json.JSONObject
 import org.junit.After
@@ -49,6 +54,7 @@ class LivePairingInstrumentedTest {
             .targetContext
             .applicationContext as OpenVtaLoggerApp
         app.container.settingsRepository.save(AppSettings())
+        app.container.updateStatus { RecordingStatus() }
         compose.activityRule.scenario.recreate()
         compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         compose.waitForIdle()
@@ -66,10 +72,9 @@ class LivePairingInstrumentedTest {
             navigateToLiveSettings()
 
             compose.onNodeWithTag("live-base-url-field").performScrollTo()
-            compose.onNodeWithTag("live-base-url-field").performTextClearance()
-            compose.onNodeWithTag("live-base-url-field").performTextInput("http://127.0.0.1:${server.port}")
+            compose.onNodeWithTag("live-base-url-field").performTextReplacement("http://127.0.0.1:${server.port}")
             compose.onNodeWithTag("live-registration-code-field").performScrollTo()
-            compose.onNodeWithTag("live-registration-code-field").performTextInput("123456")
+            compose.onNodeWithTag("live-registration-code-field").performTextReplacement("123456")
             compose.onNodeWithTag("live-register-code-button").performScrollTo()
             compose.onNodeWithTag("live-register-code-button").performClick()
 
@@ -106,10 +111,9 @@ class LivePairingInstrumentedTest {
             navigateToLiveSettings()
 
             compose.onNodeWithTag("live-base-url-field").performScrollTo()
-            compose.onNodeWithTag("live-base-url-field").performTextClearance()
-            compose.onNodeWithTag("live-base-url-field").performTextInput("http://127.0.0.1:${server.port}")
+            compose.onNodeWithTag("live-base-url-field").performTextReplacement("http://127.0.0.1:${server.port}")
             compose.onNodeWithTag("live-registration-code-field").performScrollTo()
-            compose.onNodeWithTag("live-registration-code-field").performTextInput("123456")
+            compose.onNodeWithTag("live-registration-code-field").performTextReplacement("123456")
             compose.onNodeWithTag("live-register-code-button").performScrollTo()
             compose.onNodeWithTag("live-register-code-button").performClick()
 
@@ -135,13 +139,15 @@ class LivePairingInstrumentedTest {
                 .toString()
 
             compose.onNodeWithTag("live-credential-rotation-payload-field").performScrollTo()
-            compose.onNodeWithTag("live-credential-rotation-payload-field").performTextInput(payload)
+            compose.onNodeWithTag("live-credential-rotation-payload-field").performTextReplacement(payload)
+            compose.onNodeWithTag("live-credential-rotation-payload-field")
+                .assertTextContains("api-rotated", substring = true)
+            compose.waitForIdle()
             compose.onNodeWithTag("live-apply-credential-rotation-button").performScrollTo()
+            compose.onNodeWithTag("live-apply-credential-rotation-button").assertIsEnabled()
             compose.onNodeWithTag("live-apply-credential-rotation-button").performClick()
 
-            compose.waitUntil(timeoutMillis = 10_000) {
-                app.container.settingsRepository.load().liveApiCredential == "api-rotated"
-            }
+            waitForLiveApiCredential(app, "api-rotated")
             val settings = app.container.settingsRepository.load()
             assertEquals("tenant-instrumented", settings.liveTenantId)
             assertEquals("device-instrumented", settings.liveDeviceId)
@@ -149,6 +155,52 @@ class LivePairingInstrumentedTest {
             assertEquals("wss-rotated", settings.liveWssCredential)
             assertEquals("api-rotated", settings.liveApiCredential)
         }
+    }
+
+    @Test
+    fun invalidDirectCodeShowsErrorBesidePairingField() {
+        navigateToLiveSettings()
+
+        compose.onNodeWithTag("live-registration-code-field").performScrollTo()
+        compose.onNodeWithTag("live-registration-code-field").performTextReplacement("123")
+        compose.onNodeWithTag("live-register-code-button").performScrollTo()
+        compose.onNodeWithTag("live-register-code-button").performClick()
+        compose.waitForIdle()
+
+        val app = InstrumentationRegistry.getInstrumentation()
+            .targetContext
+            .applicationContext as OpenVtaLoggerApp
+        assertEquals(
+            "Live code registration failed: Live registration code must be 6 digits",
+            app.container.status.value.lastMessage,
+        )
+        compose.onNodeWithTag("live-registration-code-error")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun invalidCredentialRotationShowsErrorBesidePayloadField() {
+        navigateToLiveSettings()
+
+        compose.onNodeWithTag("live-credential-rotation-payload-field").performScrollTo()
+        compose.onNodeWithTag("live-credential-rotation-payload-field").performTextReplacement("""{"type":"not-openvta"}""")
+        compose.waitForIdle()
+        compose.onNodeWithTag("live-apply-credential-rotation-button").performScrollTo()
+        compose.onNodeWithTag("live-apply-credential-rotation-button").performClick()
+
+        val app = InstrumentationRegistry.getInstrumentation()
+            .targetContext
+            .applicationContext as OpenVtaLoggerApp
+        compose.waitUntil(timeoutMillis = 5_000) {
+            app.container.status.value.lastMessage.startsWith("Live credential rotation failed:")
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag("live-credential-rotation-error").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("live-credential-rotation-error")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -185,6 +237,17 @@ class LivePairingInstrumentedTest {
     private fun navigateToLiveSettings() {
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithTag("settings-section-live").performClick()
+    }
+
+    private fun waitForLiveApiCredential(app: OpenVtaLoggerApp, expected: String) {
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        var latest = app.container.settingsRepository.load()
+        while (SystemClock.elapsedRealtime() < deadline) {
+            latest = app.container.settingsRepository.load()
+            if (latest.liveApiCredential == expected) return
+            Thread.sleep(100)
+        }
+        assertEquals("lastMessage=${app.container.status.value.lastMessage}", expected, latest.liveApiCredential)
     }
 
     private class RegistrationServer : Closeable {

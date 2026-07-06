@@ -8,16 +8,20 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import dev.openvta.logger.domain.AppSettings
+import dev.openvta.logger.domain.RecordingStatus
 import dev.openvta.logger.live.LiveDeviceCommand
 import dev.openvta.logger.recording.RecordingForegroundService
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,6 +38,19 @@ class MainActivityUserFlowInstrumentedTest {
 
     @get:Rule(order = 1)
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @Before
+    fun setUp() {
+        val app = ApplicationProvider.getApplicationContext<OpenVtaLoggerApp>()
+        app.startService(RecordingForegroundService.stopIntent(app))
+        waitForRecordingState(app, expected = false, timeoutMillis = 5_000)
+        app.container.liveUpstreamManager.disconnectCommandConnection()
+        app.container.settingsRepository.save(AppSettings())
+        app.container.updateStatus { RecordingStatus() }
+        compose.activityRule.scenario.recreate()
+        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        compose.waitForIdle()
+    }
 
     @After
     fun stopRecordingIfNeeded() {
@@ -55,10 +72,7 @@ class MainActivityUserFlowInstrumentedTest {
         ContextCompat.startForegroundService(app, RecordingForegroundService.stopIntent(app))
         waitForRecordingState(app, expected = false)
 
-        val created = app.container.recordingRepository
-            .listSessions()
-            .firstOrNull { it.id !in before }
-        val session = checkNotNull(created) { "UI Start/Stop should create a new session" }
+        val session = waitForNewSession(app, before, "UI Start/Stop should create a new session")
 
         assertTrue("VTA file should exist", session.vtaFile.isFile)
         assertTrue("VTA session should be closed with footer", session.vtaFile.readText().contains("%% End"))
@@ -93,10 +107,7 @@ class MainActivityUserFlowInstrumentedTest {
         assertEquals("succeeded", stop.status)
         waitForRecordingState(app, expected = false)
 
-        val created = app.container.recordingRepository
-            .listSessions()
-            .firstOrNull { it.id !in before }
-        val session = checkNotNull(created) { "Remote Start/Stop should create a new session" }
+        val session = waitForNewSession(app, before, "Remote Start/Stop should create a new session")
 
         assertTrue("VTA file should exist", session.vtaFile.isFile)
         assertTrue("VTA session should be closed with footer", session.vtaFile.readText().contains("%% End"))
@@ -120,6 +131,33 @@ class MainActivityUserFlowInstrumentedTest {
         assertEquals("failed", start.status)
         assertEquals(false, app.container.status.value.isRecording)
         assertEquals(true, start.result["requiresForeground"])
+    }
+
+    @Test
+    fun remoteStopWhileIdleReturnsExplicitNoOpResult() {
+        val app = ApplicationProvider.getApplicationContext<OpenVtaLoggerApp>()
+        if (app.container.status.value.isRecording) {
+            ContextCompat.startForegroundService(app, RecordingForegroundService.stopIntent(app))
+            waitForRecordingState(app, expected = false)
+        }
+
+        val stop = app.container.liveUpstreamManager.execute(
+            LiveDeviceCommand(
+                id = "remote-idle-stop-id",
+                commandId = "remote-idle-stop-command",
+                type = "recording.stop",
+                recordingId = null,
+                payload = null,
+            ),
+        )
+
+        assertEquals("succeeded", stop.status)
+        assertEquals(false, app.container.status.value.isRecording)
+        assertEquals(true, stop.result["noOp"])
+        assertEquals("noop", stop.result["outcome"])
+        assertEquals("idle", stop.result["state"])
+        assertEquals("already_idle", stop.result["reason"])
+        assertEquals(true, stop.result["alreadyIdle"])
     }
 
     private fun pressHomeAndWaitForBackground(app: OpenVtaLoggerApp) {
@@ -154,5 +192,24 @@ class MainActivityUserFlowInstrumentedTest {
             Thread.sleep(100)
         }
         error("Timed out waiting for foreground=$expected")
+    }
+
+    private fun waitForNewSession(
+        app: OpenVtaLoggerApp,
+        before: Set<String>,
+        message: String,
+        timeoutMillis: Long = 5_000,
+    ): dev.openvta.logger.domain.RecordingSession {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        while (SystemClock.elapsedRealtime() < deadline) {
+            app.container.recordingRepository
+                .listSessions()
+                .firstOrNull { it.id !in before }
+                ?.let { return it }
+            Thread.sleep(100)
+        }
+        val sessions = app.container.recordingRepository.listSessions().map { it.id }
+        val status = app.container.status.value
+        error("$message; before=$before sessions=$sessions statusRecording=${status.isRecording} currentSession=${status.currentSession?.id} message=${status.lastMessage}")
     }
 }

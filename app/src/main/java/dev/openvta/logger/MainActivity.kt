@@ -265,9 +265,16 @@ private fun OpenVtaLoggerAppScreen(
     val liveRegistrationClient = remember { LiveRegistrationClient() }
 
     fun applyLiveCredentialRotation(rawPayload: String) {
+        val payload = runCatching { LiveCredentialRotationPayload.parse(rawPayload) }
+            .getOrElse { exception ->
+                val message = "Live credential rotation failed: ${exception.message ?: "invalid payload"}"
+                rotationError = message
+                app.container.updateStatus { it.copy(lastMessage = message) }
+                return
+            }
+        app.container.updateStatus { it.copy(lastMessage = "Live credential rotation applying") }
         coroutineScope.launch {
             runCatching {
-                val payload = LiveCredentialRotationPayload.parse(rawPayload)
                 withContext(Dispatchers.IO) {
                     val current = app.container.settingsRepository.load()
                     val updated = payload.applyTo(current)
@@ -1001,6 +1008,7 @@ private fun formatDashboardMeters(value: Double): String = String.format(Locale.
 
 private fun String.shouldShowSnackbar(): Boolean {
     val lower = lowercase(Locale.US)
+    if (lower.startsWith("live command channel failed")) return false
     return lower.contains("failed") ||
         lower.contains("denied") ||
         lower.contains("cancelled") ||
@@ -1105,8 +1113,8 @@ private fun LiveSettingsCard(
     var manualLiveBaseUrl by rememberSaveable(settings.liveBaseUrl) {
         mutableStateOf(settings.liveBaseUrl.ifBlank { "https://openvta-live.kro.kr" })
     }
-    var manualRegistrationCode by rememberSaveable { mutableStateOf("") }
-    var rotationPayload by rememberSaveable { mutableStateOf("") }
+    var manualRegistrationCode by rememberSaveable(settings.liveBaseUrl, settings.liveDeviceId) { mutableStateOf("") }
+    var rotationPayload by rememberSaveable(settings.liveDeviceId, settings.liveApiCredential) { mutableStateOf("") }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("OpenVTA Live", style = MaterialTheme.typography.titleMedium)
@@ -1175,13 +1183,16 @@ private fun LiveSettingsCard(
                     .testTag("live-registration-code-field"),
                 singleLine = true,
                 isError = manualPairingError.isNotBlank(),
-                supportingText = {
-                    if (manualPairingError.isNotBlank()) {
-                        Text(manualPairingError)
-                    }
-                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
+            if (manualPairingError.isNotBlank()) {
+                Text(
+                    manualPairingError,
+                    modifier = Modifier.testTag("live-registration-code-error"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Button(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1213,12 +1224,15 @@ private fun LiveSettingsCard(
                 minLines = 3,
                 maxLines = 6,
                 isError = rotationError.isNotBlank(),
-                supportingText = {
-                    if (rotationError.isNotBlank()) {
-                        Text(rotationError)
-                    }
-                },
             )
+            if (rotationError.isNotBlank()) {
+                Text(
+                    rotationError,
+                    modifier = Modifier.testTag("live-credential-rotation-error"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Button(
                 modifier = Modifier.testTag("live-apply-credential-rotation-button"),
                 onClick = {

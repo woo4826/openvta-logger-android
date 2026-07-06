@@ -214,6 +214,9 @@ data class LiveCommandResult(
 ) {
     companion object {
         fun succeeded(result: Map<String, Any?> = emptyMap()) = LiveCommandResult("succeeded", result)
+        fun noop(result: Map<String, Any?> = emptyMap()) =
+            LiveCommandResult("succeeded", mapOf("outcome" to "noop", "noOp" to true) + result)
+
         fun failed(result: Map<String, Any?> = emptyMap()) = LiveCommandResult("failed", result)
     }
 }
