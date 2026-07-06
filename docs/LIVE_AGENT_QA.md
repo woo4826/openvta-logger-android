@@ -70,6 +70,42 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
   instrumentation tests and `scripts/emulator_verify.sh`, producing 1 VTA file,
   1 ZIP file, and 107 GPS rows.
 
+## Latest Local QA Evidence
+
+2026-07-07 KST, commit `41d6e51`:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+  --console=plain --stacktrace` passed.
+- No adb device was initially attached. Available AVDs were
+  `Galaxy_A16_API34`, `Galaxy_A16_API36`, and
+  `Resizable_Experimental_API_33`.
+- `Resizable_Experimental_API_33` did not boot because its AVD config points to
+  `system-images/android-33/google_apis/arm64-v8a/`, which is not installed in
+  the local SDK. The installed system images are API 34 and API 36 Google Play
+  ARM64 images.
+- `Galaxy_A16_API34` booted as `emulator-5554` after running the emulator with
+  `ANDROID_SDK_ROOT` and `ANDROID_HOME` set to the local SDK. Verbose emulator
+  output reported `Boot completed in 12049 ms`.
+- First `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
+  --console=plain --stacktrace` failed with
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE` because the emulator had a stale
+  differently signed `dev.openvta.logger` package state. A rerun after package
+  manager cleanup passed 13 connected tests.
+- `ANDROID_SERIAL=emulator-5554
+  SCREENSHOT_DIR=/tmp/openvta-android-emulator-qa-20260707
+  ./scripts/emulator_verify.sh` passed with 1 VTA file, 1 ZIP file, 95 GPS
+  rows, and screen-off growth from 290555 to 390182 bytes. Screenshots were
+  written outside Git under `/tmp/openvta-android-emulator-qa-20260707/`.
+- `ANDROID_SERIAL=emulator-5554 RESET_APP_DATA=1
+  OUT_DIR=/tmp/openvta-live-agent-qa-20260707
+  ./scripts/live_mock_gps_60s_verify.sh` passed. Summary:
+  `gpsRows=60`, `uniqueGpsPoints=60`, `routeSeconds=60`,
+  `liveEnabled=0`, `liveOfflineBacklog=0`, and empty
+  `crash_anr_markers.txt`. Artifacts were written outside Git under
+  `/tmp/openvta-live-agent-qa-20260707/20260706T230753Z/`.
+- The emulator was stopped with `adb -s emulator-5554 emu kill`; `adb devices`
+  was empty after cleanup.
+
 ## Remaining Live QA Gaps
 
 - Physical production test-device credential rotation still needs to be
