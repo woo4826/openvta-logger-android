@@ -332,9 +332,7 @@ private fun OpenVtaLoggerAppScreen(
                     app.container.updateStatus { it.copy(lastMessage = "Live device registered") }
                 } catch (exception: Exception) {
                     val message = "$sourceLabel registration failed: ${exception.message ?: "unknown error"}"
-                    if (sourceLabel.contains("code", ignoreCase = true)) {
-                        manualPairingError = message
-                    }
+                    manualPairingError = message
                     app.container.updateStatus { it.copy(lastMessage = message) }
                 } finally {
                     liveRegistrationBusy = false
@@ -360,7 +358,9 @@ private fun OpenVtaLoggerAppScreen(
             runCatching { LiveRegistrationQrPayload.parse(rawQr, fallbackBaseUrl = settings.liveBaseUrl) }
                 .onSuccess { registerLivePayload(it, "Live QR") }
                 .onFailure { exception ->
-                    app.container.updateStatus { it.copy(lastMessage = "Live QR registration failed: ${exception.message}") }
+                    val message = "Live QR registration failed: ${exception.message ?: "invalid payload"}"
+                    manualPairingError = message
+                    app.container.updateStatus { it.copy(lastMessage = message) }
                 }
         }
     }
@@ -383,7 +383,9 @@ private fun OpenVtaLoggerAppScreen(
                 }
                     .onSuccess(registerLiveFromQr)
                     .onFailure { exception ->
-                        app.container.updateStatus { it.copy(lastMessage = "Live QR image failed: ${exception.message}") }
+                        val message = "Live QR image failed: ${exception.message ?: "decode failed"}"
+                        manualPairingError = message
+                        app.container.updateStatus { it.copy(lastMessage = message) }
                     }
             }
         }
@@ -1140,7 +1142,10 @@ private fun LiveSettingsCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("live-scan-qr-button"),
-                    onClick = onScanLiveQr,
+                    onClick = {
+                        if (manualPairingError.isNotBlank()) onClearManualPairingError()
+                        onScanLiveQr()
+                    },
                     enabled = !liveRegistrationBusy,
                 ) {
                     Icon(Icons.Default.CloudUpload, contentDescription = null)
@@ -1151,7 +1156,10 @@ private fun LiveSettingsCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("live-qr-image-button"),
-                    onClick = onSelectLiveQrImage,
+                    onClick = {
+                        if (manualPairingError.isNotBlank()) onClearManualPairingError()
+                        onSelectLiveQrImage()
+                    },
                     enabled = !liveRegistrationBusy,
                 ) {
                     Icon(Icons.Default.Folder, contentDescription = null)

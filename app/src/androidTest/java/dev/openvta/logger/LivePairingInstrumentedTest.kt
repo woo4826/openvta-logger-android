@@ -204,6 +204,33 @@ class LivePairingInstrumentedTest {
     }
 
     @Test
+    fun invalidQrScanShowsErrorBesidePairingControls() {
+        navigateToLiveSettings()
+        intending(hasComponent(CaptureActivity::class.java.name))
+            .respondWith(
+                android.app.Instrumentation.ActivityResult(
+                    Activity.RESULT_OK,
+                    Intent()
+                        .putExtra("SCAN_RESULT", "not-openvta-live")
+                        .putExtra("SCAN_RESULT_FORMAT", "QR_CODE"),
+                ),
+            )
+
+        compose.onNodeWithTag("live-scan-qr-button").performScrollTo()
+        compose.onNodeWithTag("live-scan-qr-button").performClick()
+
+        val app = InstrumentationRegistry.getInstrumentation()
+            .targetContext
+            .applicationContext as OpenVtaLoggerApp
+        compose.waitUntil(timeoutMillis = 5_000) {
+            app.container.status.value.lastMessage.startsWith("Live QR registration failed:")
+        }
+        compose.onNodeWithTag("live-registration-code-error")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun liveQrScanActionLaunchesScannerHandoff() {
         navigateToLiveSettings()
         intending(hasComponent(CaptureActivity::class.java.name))
