@@ -44,6 +44,11 @@ object LiveEndpointConfig {
         }
     }
 
+    fun mqttAckTopic(settings: AppSettings): String? {
+        if (settings.liveTenantId.isBlank() || settings.liveDeviceId.isBlank()) return null
+        return "vta/${settings.liveTenantId}/${settings.liveDeviceId}/ack"
+    }
+
     fun mqttQos(entry: LiveOutboxEntry): Int =
         if (entry.kind == "heartbeat") 0 else 1
 

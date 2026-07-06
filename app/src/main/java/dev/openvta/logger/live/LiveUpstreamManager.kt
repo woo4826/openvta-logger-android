@@ -10,7 +10,8 @@ import java.util.concurrent.Executors
 class LiveUpstreamManager(
     private val loadSettings: () -> AppSettings,
     private val outboxRepository: LiveOutboxStore,
-    private val syncClient: LiveSyncClient = LiveHybridSyncClient(),
+    syncClient: LiveSyncClient? = null,
+    mqttPublisher: LiveMqttPublisher = PahoLiveMqttPublisher(),
     private val vtaUploadClient: LiveVtaUploadClient = LiveHttpSyncClient(),
     private val commandClient: LiveCommandClient = LiveCommandClient(),
     private val commandActionHandler: LiveCommandActionHandler = NoopLiveCommandActionHandler,
@@ -18,6 +19,11 @@ class LiveUpstreamManager(
     private val onTransferStatus: (String) -> Unit = {},
     private val executor: Executor = defaultExecutor(),
 ) : LiveCommandExecutor {
+    private val syncClient: LiveSyncClient = syncClient ?: LiveHybridSyncClient(
+        onMqttServerAck = ::handleMqttServerAck,
+        publisher = mqttPublisher,
+    )
+
     constructor(
         settingsRepository: SecureSettingsRepository,
         outboxRepository: LiveOutboxStore,
@@ -88,8 +94,12 @@ class LiveUpstreamManager(
         return acked
     }
 
-    fun handleServerAck(raw: String): Int =
-        LiveProtocol.parseServerAck(raw)?.let(outboxRepository::applyServerAck) ?: 0
+    fun handleServerAck(raw: String): Int {
+        val ack = LiveProtocol.parseServerAck(raw) ?: return 0
+        val settings = loadSettings()
+        if (settings.liveDeviceId.isNotBlank() && ack.deviceId != settings.liveDeviceId) return 0
+        return outboxRepository.applyServerAck(ack)
+    }
 
     fun refreshCommandConnection() {
         val settings = loadSettings()
@@ -147,6 +157,13 @@ class LiveUpstreamManager(
 
     private fun refreshCommandConnection(settings: AppSettings) {
         runCatching { commandClient.ensureConnected(settings, this) }
+    }
+
+    private fun handleMqttServerAck(raw: String) {
+        val acked = handleServerAck(raw)
+        if (acked <= 0) return
+        val label = if (acked == 1) "payload" else "payloads"
+        onTransferStatus("Live acknowledged $acked $label")
     }
 
     private fun enqueueVtaMetadata(settings: AppSettings, session: RecordingSession) {

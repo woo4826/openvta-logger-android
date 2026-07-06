@@ -189,6 +189,43 @@ class LiveUpstreamManagerTest {
     }
 
     @Test
+    fun mqttAckSubscriptionCleansEntriesDeliveredByFallback() {
+        val repository = LiveOutboxRepository(temporaryFolder.root)
+        val publisher = CapturingMqttPublisher()
+        val transferMessages = mutableListOf<String>()
+        val settings = liveSettings().copy(
+            liveBaseUrl = "http://127.0.0.1:9",
+            liveMqttCredential = "mqtt_secret",
+        )
+        val manager = LiveUpstreamManager(
+            loadSettings = { settings },
+            outboxRepository = repository,
+            mqttPublisher = publisher,
+            onTransferStatus = transferMessages::add,
+            executor = Executor { it.run() },
+        )
+        repository.enqueue(
+            kind = "telemetry",
+            recordingId = "recording_01",
+            seqStart = 1,
+            seqEnd = 1,
+            payloadHash = "sha256:abc",
+            payloadJson = """{"stream":"telemetry","recordingId":"recording_01","payload":{"points":[{"seq":1}]}}""",
+        )
+
+        assertEquals(0, manager.flushPending())
+        assertEquals(LiveOutboxStatus.Sent, repository.listPending().single().status)
+        assertEquals("vta/tenant_01/device_01/ack", publisher.ackSubscription?.topic)
+
+        publisher.ackSubscription?.onMessage?.invoke(
+            """{"v":1,"type":"server.ack","deviceId":"device_01","recordingId":"recording_01","ackedRanges":[[1,1]],"missingRanges":[],"acceptedPayloads":[{"seqStart":1,"seqEnd":1,"payloadHash":"sha256:abc"}],"serverReceivedAt":"2026-07-01T00:00:00.000Z"}""",
+        )
+
+        assertEquals(0, manager.pendingCount())
+        assertEquals("Live acknowledged 1 payload", transferMessages.last())
+    }
+
+    @Test
     fun flushPendingDoesNotLetOldFailedEntryBlockFreshTelemetry() {
         val repository = LiveOutboxRepository(temporaryFolder.root)
         val settings = liveSettings()
@@ -467,6 +504,25 @@ class LiveUpstreamManagerTest {
         liveDeviceId = "device_01",
         liveApiCredential = "api_secret",
     )
+
+    private class CapturingMqttPublisher : LiveMqttPublisher {
+        var ackSubscription: LiveMqttSubscription? = null
+
+        override fun publish(
+            serverUri: String,
+            clientId: String,
+            username: String,
+            password: String,
+            topic: String,
+            payload: String,
+            qos: Int,
+            will: LiveMqttWill?,
+            ackSubscription: LiveMqttSubscription?,
+        ): Boolean {
+            this.ackSubscription = ackSubscription
+            return true
+        }
+    }
 
     private class RecordingCommandClient : LiveCommandClient() {
         var ensureConnectedCalls = 0
