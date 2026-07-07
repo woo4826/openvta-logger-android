@@ -57,6 +57,34 @@ class LiveCommandClientTest {
     }
 
     @Test
+    fun sendsExplicitIdleNoOpResultForIdleStop() {
+        val sent = mutableListOf<String>()
+        val result = LiveCommandClient().handleServerMessage(
+            raw = """{"event":"command.created","payload":{"id":"id_03","commandId":"cmd_03","type":"recording.stop"}}""",
+            send = { sent += it },
+            executor = object : LiveCommandExecutor {
+                override fun execute(command: LiveDeviceCommand): LiveCommandResult {
+                    return LiveCommandResult.idleStopNoop()
+                }
+            },
+        )
+
+        assertEquals("succeeded", result?.status)
+        val commandResult = JSONObject(sent[1])
+        assertEquals("command.result", commandResult.getString("type"))
+        assertEquals("cmd_03", commandResult.getString("commandId"))
+        assertEquals("succeeded", commandResult.getString("status"))
+
+        val payload = commandResult.getJSONObject("result")
+        assertEquals(true, payload.getBoolean("noOp"))
+        assertEquals("noop", payload.getString("outcome"))
+        assertEquals("recording.stop", payload.getString("action"))
+        assertEquals("idle", payload.getString("state"))
+        assertEquals("already_idle", payload.getString("reason"))
+        assertEquals(true, payload.getBoolean("alreadyIdle"))
+    }
+
+    @Test
     fun reconnectBackoffIsCapped() {
         assertEquals(1_000L, reconnectDelayMillis(1))
         assertEquals(2_000L, reconnectDelayMillis(2))

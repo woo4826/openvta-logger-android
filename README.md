@@ -26,6 +26,10 @@ This repository is prepared for public collaboration under the Apache License 2.
 - MapLibre + OpenStreetMap live map with current position, route path, and separate raw/enhanced point markers.
 - Live and saved-session charts/details for speed, altitude, accuracy, provider, satellites, elapsed realtime, source, and confidence.
 - Session management with ZIP creation, Android sharesheet export, and optional FTP upload.
+- Optional OpenVTA Live upstream supports remote start/stop commands. A remote
+  `recording.stop` received while idle returns a successful no-op result with
+  `state=idle` and `reason=already_idle`, so the web command history can show
+  the difference between an idle no-op and a failed command.
 - FTP settings stored through encrypted Android storage. Credentials are user-supplied and are not hardcoded.
 - GitHub Actions CI for script validation, debug build, unit tests, and lint. Connected emulator/app QA is manual-only from the dedicated Android QA thread.
 
@@ -72,7 +76,10 @@ Optional connected emulator QA:
 
 Run connected emulator or real-device checks only from the dedicated mobile QA
 thread. The default local and CI cycle intentionally stays on JVM tests, lint,
-and debug builds so Live backend deploy iterations stay short.
+and debug builds so Live backend deploy iterations stay short. Remote Live
+command serialization, command results, MQTT/HTTP sync behavior, GPX/simulation
+contracts, and settings validation should be covered by JVM tests in this repo
+or the OpenVTA Live simulation-testbed instead of default CI app launches.
 
 Local FTP smoke test helper:
 

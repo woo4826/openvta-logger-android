@@ -217,6 +217,15 @@ data class LiveCommandResult(
         fun noop(result: Map<String, Any?> = emptyMap()) =
             LiveCommandResult("succeeded", mapOf("outcome" to "noop", "noOp" to true) + result)
 
+        fun idleStopNoop() = noop(
+            mapOf(
+                "action" to "recording.stop",
+                "state" to "idle",
+                "reason" to "already_idle",
+                "alreadyIdle" to true,
+            ),
+        )
+
         fun failed(result: Map<String, Any?> = emptyMap()) = LiveCommandResult("failed", result)
     }
 }
