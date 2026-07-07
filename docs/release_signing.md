@@ -6,7 +6,11 @@ Do not commit the Android release keystore to git, even in a private repository.
 
 For open source collaboration, use this split:
 
-- Pull requests: build debug APK, unit tests, lint, and emulator tests. No release secret access.
+- Pull requests and normal pushes: build debug APK, unit tests, and lint. No
+  release secret access and no connected emulator or real-device app QA.
+- Manual Android QA thread: `workflow_dispatch` on Android CI with
+  `run_connected_emulator=true` may run connected emulator checks when a
+  release owner explicitly needs app-level evidence.
 - Maintainer release: protected GitHub Actions environment named `release`, manual approval, and release signing secrets.
 - Direct APK distribution: protect the release keystore strictly because that key is the app update identity for users. This is the current project default.
 - Future Play Store distribution: use Google Play App Signing and store only the upload key in CI.
@@ -43,6 +47,8 @@ Use `.github/workflows/android-ci.yml` for normal collaboration and `.github/wor
 Safe defaults:
 
 - Do not expose signing secrets to `pull_request` jobs.
+- Keep connected emulator and physical-device checks out of default push/PR CI;
+  run them only from the dedicated mobile QA thread.
 - Do not use `pull_request_target` to build untrusted contributor code with secrets.
 - Prefer `workflow_dispatch` or protected `v*` tags for signed artifacts.
 - Add required reviewers to the `release` environment before inviting external collaborators.
