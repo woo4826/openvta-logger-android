@@ -1168,6 +1168,14 @@ private fun LiveSettingsCard(
                     Text("QR image")
                 }
             }
+            if (manualPairingError.isNotBlank() && pairingErrorTarget == LivePairingErrorTarget.QrPayload) {
+                Text(
+                    manualPairingError,
+                    modifier = Modifier.testTag("live-qr-payload-error"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             OutlinedTextField(
                 value = manualLiveBaseUrl,
                 onValueChange = {
@@ -1300,15 +1308,17 @@ private fun LiveSettingsCard(
 
 internal enum class LivePairingErrorTarget {
     ServerUrl,
+    QrPayload,
     RegistrationCode,
 }
 
 internal fun livePairingErrorTarget(message: String): LivePairingErrorTarget {
     val normalized = message.lowercase()
-    return if (normalized.contains("server url") || normalized.contains("base url")) {
-        LivePairingErrorTarget.ServerUrl
-    } else {
-        LivePairingErrorTarget.RegistrationCode
+    return when {
+        normalized.contains("server url") || normalized.contains("base url") -> LivePairingErrorTarget.ServerUrl
+        normalized.contains("6 digit") || normalized.contains("pairing code") || normalized.contains("registration code") -> LivePairingErrorTarget.RegistrationCode
+        normalized.contains("qr") || normalized.contains("payload") || normalized.contains("decode") -> LivePairingErrorTarget.QrPayload
+        else -> LivePairingErrorTarget.RegistrationCode
     }
 }
 

@@ -27,4 +27,16 @@ class LiveSettingsErrorTargetTest {
             livePairingErrorTarget("Live QR registration failed: Live QR must contain a 6 digit pairing code"),
         )
     }
+
+    @Test
+    fun classifiesQrPayloadAndImageDecodeErrors() {
+        assertEquals(
+            LivePairingErrorTarget.QrPayload,
+            livePairingErrorTarget("Live QR registration failed: invalid payload"),
+        )
+        assertEquals(
+            LivePairingErrorTarget.QrPayload,
+            livePairingErrorTarget("Live QR image failed: decode failed"),
+        )
+    }
 }
