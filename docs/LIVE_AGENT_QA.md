@@ -73,6 +73,31 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
 
 ## Latest Local QA Evidence
 
+2026-07-07 KST, commit `0579d4d`:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+  --console=plain --stacktrace` passed.
+- `Galaxy_A16_API34` booted as `emulator-5554` with
+  `ANDROID_HOME` and `ANDROID_SDK_ROOT` set to the local SDK.
+- `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
+  --console=plain --stacktrace` passed 13 connected tests on
+  `Galaxy_A16_API34(AVD) - 14`.
+- `ANDROID_SERIAL=emulator-5554
+  SCREENSHOT_DIR=/tmp/openvta-android-emulator-qa-20260707-current
+  ./scripts/emulator_verify.sh` passed with 1 VTA file, 1 ZIP file, 94 GPS
+  rows, and screen-off growth from 288481 to 387011 bytes. Screenshots were
+  written outside Git under
+  `/tmp/openvta-android-emulator-qa-20260707-current/`.
+- `ANDROID_SERIAL=emulator-5554 RESET_APP_DATA=1
+  OUT_DIR=/tmp/openvta-live-agent-qa-20260707-current
+  ./scripts/live_mock_gps_60s_verify.sh` passed. Summary:
+  `gpsRows=60`, `uniqueGpsPoints=60`, `routeSeconds=60`,
+  `liveEnabled=0`, `liveOfflineBacklog=0`, and empty
+  `crash_anr_markers.txt`. Artifacts were written outside Git under
+  `/tmp/openvta-live-agent-qa-20260707-current/20260707T004651Z/`.
+- The emulator was stopped with `adb -s emulator-5554 emu kill`; `adb devices`
+  was empty after cleanup.
+
 2026-07-07 KST, commit `41d6e51`:
 
 - `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
