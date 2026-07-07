@@ -2,7 +2,7 @@
 
 Open-source Kotlin/Jetpack Compose Android logger for GPS and phone sensor data. The app writes VTA-compatible session files, can compress sessions to ZIP, visualizes live and saved sessions, and optionally uploads ZIP files to a user-configured FTP server.
 
-Current app version: `0.0.3`.
+Current app version: `0.0.4`.
 
 This repository is prepared for public collaboration under the Apache License 2.0. It does not intentionally track signing keys, original APK reverse-engineering artifacts, generated release APKs, local FTP uploads, or user credentials.
 
@@ -27,7 +27,7 @@ This repository is prepared for public collaboration under the Apache License 2.
 - Live and saved-session charts/details for speed, altitude, accuracy, provider, satellites, elapsed realtime, source, and confidence.
 - Session management with ZIP creation, Android sharesheet export, and optional FTP upload.
 - FTP settings stored through encrypted Android storage. Credentials are user-supplied and are not hardcoded.
-- GitHub Actions CI for script validation, debug build, unit tests, lint, connected emulator checks, and signed release APK artifact generation.
+- GitHub Actions CI for script validation, debug build, unit tests, and lint. Connected emulator/app QA is manual-only from the dedicated Android QA thread.
 
 ## VTA Data Format
 
@@ -63,12 +63,16 @@ Version `0.0.3` changed the package from the earlier Kotlin test package `com.te
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-Connected emulator tests:
+Optional connected emulator QA:
 
 ```bash
 ./gradlew connectedDebugAndroidTest
 ./scripts/emulator_verify.sh
 ```
+
+Run connected emulator or real-device checks only from the dedicated mobile QA
+thread. The default local and CI cycle intentionally stays on JVM tests, lint,
+and debug builds so Live backend deploy iterations stay short.
 
 Local FTP smoke test helper:
 
@@ -92,9 +96,9 @@ Release signing material is intentionally excluded from this repository. Build r
 
 The locally produced delivery artifacts are kept under `output/apk/` and are ignored by git:
 
-- `OpenVTA-Logger-0.0.3-release.apk`
+- `OpenVTA-Logger-0.0.4-release.apk`
 - `OpenVTA_Logger_User_Guide.pdf`
-- `OpenVTA_Logger_v0.0.3.zip`
+- `OpenVTA_Logger_v0.0.4.zip`
 
 For GitHub Actions releases, configure the protected `release` environment with the secrets documented in `docs/release_signing.md`. Normal pull request and push CI builds debug artifacts only and does not need release secrets.
 
@@ -111,7 +115,7 @@ Current public-readiness status from the latest local audit:
 - Tracked source does not include the local release keystore, `release-signing/`, generated APK/AAB files, original APK analysis files, decoded APK output, or user logs.
 - Git history is short and does not show tracked keystore/APK/reverse-engineering artifacts.
 - Release signing is isolated to GitHub Actions secrets and local ignored files.
-- CI on `main` currently covers script validation, debug build, unit tests, lint, connected emulator tests, and signed release APK verification.
+- CI on `main` currently covers script validation, debug build, unit tests, and lint. Connected emulator verification is available only through manual `workflow_dispatch` with `run_connected_emulator=true`.
 - Branch protection and secret scanning/push protection should remain enabled on GitHub.
 
 Rules for future changes:
