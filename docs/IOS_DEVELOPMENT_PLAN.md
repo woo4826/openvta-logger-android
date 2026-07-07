@@ -87,6 +87,8 @@ and are accessed only by OpenVTA Live backend services through `StorageAdapter`.
   metadata, and VTA bytes through OpenVTA Live API endpoints.
 - Delete local upload outbox entries only after the server acknowledges the
   relevant sequence range, manifest, or chunk checksum.
+- Treat `POST /api/devices/:deviceId/telemetry` as the HTTP telemetry fallback;
+  its response includes `serverAck` data used for outbox cleanup.
 - Preserve VTA byte upload entries until the server manifest/download path can
   verify the uploaded bytes.
 - Implement missing-range recovery before treating offline backlog handling as
@@ -97,6 +99,9 @@ and are accessed only by OpenVTA Live backend services through `StorageAdapter`.
 - Use `URLSessionWebSocketTask` for owner command/control when the app is
   foregrounded or iOS permits the connection.
 - Implement `recording.start` and `recording.stop` command results.
+- Device command terminal states are sent as `/ws/device-control`
+  `command.result` messages. `POST /api/devices/:deviceId/commands` is the
+  owner/admin command creation endpoint, not the device result path.
 - Foreground remote start/stop should reach terminal success when permissions
   and recording state allow it.
 - Idle remote stop should return a clear no-op/idle result.
@@ -114,11 +119,14 @@ Use the OpenVTA Live API and never object-storage credentials.
 | --- | --- |
 | Create pairing code in user web | `POST /api/devices/registration-token` |
 | Pair iOS device | `POST /api/devices/registration/consume` |
+| Send telemetry fallback | `POST /api/devices/:deviceId/telemetry` |
 | Send device status | `POST /api/devices/:deviceId/status` |
 | Create/update recording | `POST /api/devices/:deviceId/recordings` and status ingest |
 | Upload VTA chunk | `POST /api/devices/:deviceId/recordings/:recordingId/chunks/:chunkId` |
+| Verify manifest/download | `GET /api/recordings/:recordingId/manifest` and `GET /api/recordings/:recordingId/download` |
 | Retrieve missing ranges | `GET /api/recordings/:recordingId/missing-ranges` |
 | Command channel | `/ws/device-control` with WSS credential |
+| Command result reporting | `/ws/device-control` `command.result` payload |
 
 The backend owns user/admin recording history, VTA Cloud Library assets, object
 storage, retention deletion, sample publishing, admin approvals, and audit
