@@ -58,7 +58,7 @@ Legacy consumers can continue reading `$` and `#` records. New tools should trea
 Version `0.0.3` changed the package from the earlier Kotlin test package `com.temporal.vtalogger` to `dev.openvta.logger`.
 
 - Android treats `dev.openvta.logger` as a separate app, so `0.0.3` can coexist with earlier `com.temporal.vtalogger` test builds.
-- Users who installed `0.0.2` should uninstall the older test app after exporting any needed sessions, then use `0.0.3` as the new OpenVTA Logger line.
+- Users who installed `0.0.2` should uninstall the older test app after exporting any needed sessions, then use the `0.0.3+` `dev.openvta.logger` line as the OpenVTA Logger app.
 - Future `dev.openvta.logger` releases must use the same release signing key to support normal APK updates.
 
 ## Build And Test
@@ -142,9 +142,23 @@ Rules for future changes:
 - `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation, v0.0.2+ enhancement presets, and IMU fusion roadmap.
 - `docs/release_signing.md`: release keystore and GitHub Actions secret strategy.
 
+## Developer Handoff Docs
+
+- `docs/HANDOFF.md`: current project state, verified release links, decisions, and quick start.
+- `docs/PRODUCT_AND_PLANNING.md`: product intent, implemented scope, design decisions, and roadmap.
+- `docs/ARCHITECTURE.md`: Android/Kotlin module structure and runtime data flow.
+- `docs/DATA_FORMAT.md`: `.Vta`/ZIP/export format, raw versus enhanced records, and storage paths.
+- `docs/QA_AND_RELEASE.md`: local test, emulator QA, release signing, GitHub Actions, and APK publishing runbook.
+- `docs/USER_SHARE_GUIDE.md`: text that can be sent to testers/users for install and IMU preset usage.
+- `docs/IOS_DEVELOPMENT_PLAN.md`: iOS feasibility, distribution, and implementation plan.
+
 ## Roadmap
 
 - Real-time ESKF/EKF fusion for short GPS gaps and low-latency path estimation.
+- External Bluetooth GPS and external IMU logging support for higher-grade data capture.
+- Rider incident/EDR-style event markers for fall/crash detection, speed, and location snapshots after explicit rider initialization.
+- Notification-center and compact floating/PiP-style recording controls, subject to Android platform policy limits.
+- iOS app planning for App Store, TestFlight, or Apple-supported limited distribution where platform capabilities allow it.
 - Offline smoothing for saved sessions.
 - Optional map matching for road-only workflows.
 - Secure transport support beyond plain FTP.
