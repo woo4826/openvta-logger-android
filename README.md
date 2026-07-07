@@ -131,7 +131,7 @@ Rules for future changes:
 - `app/src/main/java/dev/openvta/logger/domain/`: VTA formatting, parsing, distance, filenames, ZIP helpers.
 - `app/src/main/java/dev/openvta/logger/upload/`: FTP upload worker/client.
 - `app/src/main/java/dev/openvta/logger/ui/`: Compose UI and visualization views.
-- `.github/workflows/android-ci.yml`: CI build/test/lint and emulator verification.
+- `.github/workflows/android-ci.yml`: default CI build/test/lint plus manual emulator verification.
 - `docs/imu_gps_fusion_plan.md`: GPS 1 Hz limitation, v0.0.2+ enhancement presets, and IMU fusion roadmap.
 - `docs/release_signing.md`: release keystore and GitHub Actions secret strategy.
 
