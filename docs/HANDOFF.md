@@ -69,6 +69,10 @@ preparation:
 
 Current `0.0.4` / Live upstream verification evidence:
 
+- On 2026-07-08 KST, commit `97805c9` passed the current local default Android
+  gate: `./gradlew testDebugUnitTest lintDebug assembleDebug --console=plain`.
+  This refresh intentionally did not run connected emulator, mock-GPS, or
+  physical-device production QA; those remain in the dedicated mobile QA thread.
 - Android CI run `28891705229` passed on `main` after Live pairing error
   placement fixes.
 - Release APK workflow run `28749474216` passed for tag `v0.0.4`.

@@ -87,6 +87,16 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
 
 ## Latest Local QA Evidence
 
+2026-07-08 KST, commit `97805c9`:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug --console=plain`
+  passed locally. Gradle reported `BUILD SUCCESSFUL`; the run executed
+  `lintDebug` and reused up-to-date unit-test/debug-build outputs.
+- No connected emulator, mock-GPS, or physical-device production QA was run in
+  this refresh. Those checks remain assigned to the dedicated mobile QA thread
+  so the Live backend release cycle can rely on unit/lint/debug build plus the
+  simulation-testbed contract gate.
+
 2026-07-07 KST, commit `0579d4d`:
 
 - `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
