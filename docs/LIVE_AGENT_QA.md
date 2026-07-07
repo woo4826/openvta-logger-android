@@ -2,6 +2,12 @@
 
 This runbook is for parallel agents validating the Android logger on a local emulator. Use it from the `openvta-logger-android` repository root only. Keep emulator sessions, `.Vta` files, ZIPs, APKs, logs, and credentials out of Git.
 
+Connected emulator and physical-device QA are intentionally outside GitHub
+Actions CI. Use this runbook from the dedicated mobile QA thread on a local
+machine or a separate mobile QA runner. The repository CI stays limited to JVM
+unit tests, Android lint, debug build, and script syntax validation so backend
+and web deployment cycles remain short.
+
 ## Baseline Checks
 
 Run the ordinary JVM, lint, and debug build checks before connected-device QA:

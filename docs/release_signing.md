@@ -8,9 +8,10 @@ For open source collaboration, use this split:
 
 - Pull requests and normal pushes: build debug APK, unit tests, and lint. No
   release secret access and no connected emulator or real-device app QA.
-- Manual Android QA thread: `workflow_dispatch` on Android CI with
-  `run_connected_emulator=true` may run connected emulator checks when a
-  release owner explicitly needs app-level evidence.
+- Manual Android QA thread: run connected emulator or real-device checks from a
+  local workstation or a dedicated mobile QA runner outside GitHub Actions CI.
+  Keep emulator logs, screenshots, APKs, and generated VTA/ZIP artifacts out of
+  Git.
 - Maintainer release: protected GitHub Actions environment named `release`, manual approval, and release signing secrets.
 - Direct APK distribution: protect the release keystore strictly because that key is the app update identity for users. This is the current project default.
 - Future Play Store distribution: use Google Play App Signing and store only the upload key in CI.
@@ -47,7 +48,7 @@ Use `.github/workflows/android-ci.yml` for normal collaboration and `.github/wor
 Safe defaults:
 
 - Do not expose signing secrets to `pull_request` jobs.
-- Keep connected emulator and physical-device checks out of default push/PR CI;
+- Keep connected emulator and physical-device checks out of GitHub Actions CI;
   run them only from the dedicated mobile QA thread.
 - Do not use `pull_request_target` to build untrusted contributor code with secrets.
 - Prefer `workflow_dispatch` or protected `v*` tags for signed artifacts.
