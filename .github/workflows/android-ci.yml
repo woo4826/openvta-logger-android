@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      run_connected_emulator:
+        description: Run connected emulator app QA. Use only from the dedicated Android QA thread.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,6 +51,7 @@ jobs:
           if-no-files-found: warn
 
   connected-emulator-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_connected_emulator
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
