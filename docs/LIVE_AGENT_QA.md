@@ -57,6 +57,10 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
 - Opt-in OpenVTA Live pairing uses the six-digit registration flow. QR scan and
   gallery QR import are convenience paths; direct code entry remains required
   for QA.
+- Settings Live shows pairing validation near the relevant input: invalid
+  server URL messages render under the Live server URL field, invalid pairing
+  code or QR messages render under the six-digit code field, and credential
+  rotation errors render under the rotation payload field.
 - HTTP is the primary upstream path for device status, recording metadata,
   telemetry, and VTA bytes.
 - MQTT fallback subscribes to the per-device server ack topic and only clears

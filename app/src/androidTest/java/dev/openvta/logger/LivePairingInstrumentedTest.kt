@@ -3,6 +3,7 @@ package dev.openvta.logger
 import android.app.Activity
 import android.content.Intent
 import android.os.SystemClock
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextContains
@@ -177,6 +178,24 @@ class LivePairingInstrumentedTest {
         compose.onNodeWithTag("live-registration-code-error")
             .performScrollTo()
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun invalidManualServerUrlShowsErrorBesideUrlField() {
+        navigateToLiveSettings()
+
+        compose.onNodeWithTag("live-base-url-field").performScrollTo()
+        compose.onNodeWithTag("live-base-url-field").performTextReplacement("openvta-live.local")
+        compose.onNodeWithTag("live-registration-code-field").performScrollTo()
+        compose.onNodeWithTag("live-registration-code-field").performTextReplacement("123456")
+        compose.onNodeWithTag("live-register-code-button").performScrollTo()
+        compose.onNodeWithTag("live-register-code-button").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("live-base-url-error")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onAllNodesWithTag("live-registration-code-error").assertCountEquals(0)
     }
 
     @Test

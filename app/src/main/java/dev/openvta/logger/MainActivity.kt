@@ -1117,6 +1117,7 @@ private fun LiveSettingsCard(
     }
     var manualRegistrationCode by rememberSaveable(settings.liveBaseUrl, settings.liveDeviceId) { mutableStateOf("") }
     var rotationPayload by rememberSaveable(settings.liveDeviceId, settings.liveApiCredential) { mutableStateOf("") }
+    val pairingErrorTarget = livePairingErrorTarget(manualPairingError)
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("OpenVTA Live", style = MaterialTheme.typography.titleMedium)
@@ -1178,7 +1179,16 @@ private fun LiveSettingsCard(
                     .fillMaxWidth()
                     .testTag("live-base-url-field"),
                 singleLine = true,
+                isError = manualPairingError.isNotBlank() && pairingErrorTarget == LivePairingErrorTarget.ServerUrl,
             )
+            if (manualPairingError.isNotBlank() && pairingErrorTarget == LivePairingErrorTarget.ServerUrl) {
+                Text(
+                    manualPairingError,
+                    modifier = Modifier.testTag("live-base-url-error"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             OutlinedTextField(
                 value = manualRegistrationCode,
                 onValueChange = {
@@ -1190,10 +1200,10 @@ private fun LiveSettingsCard(
                     .fillMaxWidth()
                     .testTag("live-registration-code-field"),
                 singleLine = true,
-                isError = manualPairingError.isNotBlank(),
+                isError = manualPairingError.isNotBlank() && pairingErrorTarget == LivePairingErrorTarget.RegistrationCode,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
-            if (manualPairingError.isNotBlank()) {
+            if (manualPairingError.isNotBlank() && pairingErrorTarget == LivePairingErrorTarget.RegistrationCode) {
                 Text(
                     manualPairingError,
                     modifier = Modifier.testTag("live-registration-code-error"),
@@ -1285,6 +1295,20 @@ private fun LiveSettingsCard(
                 }
             }
         }
+    }
+}
+
+internal enum class LivePairingErrorTarget {
+    ServerUrl,
+    RegistrationCode,
+}
+
+internal fun livePairingErrorTarget(message: String): LivePairingErrorTarget {
+    val normalized = message.lowercase()
+    return if (normalized.contains("server url") || normalized.contains("base url")) {
+        LivePairingErrorTarget.ServerUrl
+    } else {
+        LivePairingErrorTarget.RegistrationCode
     }
 }
 
