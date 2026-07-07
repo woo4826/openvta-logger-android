@@ -80,6 +80,10 @@ On Android API 36 emulator images, `adb emu geo fix` may not update the app-visi
   `build-and-unit-test` and `connected-emulator-test`. The connected job ran 13
   instrumentation tests and `scripts/emulator_verify.sh`, producing 1 VTA file,
   1 ZIP file, and 107 GPS rows.
+- That connected CI job is historical evidence only. Current push, pull-request,
+  and manual GitHub Actions runs have a single `build-and-unit-test` job and no
+  `run_connected_emulator` input; connected app QA stays in the dedicated mobile
+  QA thread.
 
 ## Latest Local QA Evidence
 
