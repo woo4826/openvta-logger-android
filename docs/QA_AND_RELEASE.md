@@ -126,10 +126,10 @@ Default checks on `main`:
 
 - `build-and-unit-test`
 
-Manual-only check:
-
-- `connected-emulator-test`, available through `workflow_dispatch` with
-  `run_connected_emulator=true`
+Connected emulator and real-device checks are intentionally not defined in the
+default GitHub Actions workflow. Run them from the dedicated mobile QA thread
+on a local workstation or separate mobile QA runner, using the commands in
+this runbook and `docs/LIVE_AGENT_QA.md`.
 
 Latest verified `v0.0.3` CI:
 
